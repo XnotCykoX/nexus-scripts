@@ -20,7 +20,8 @@ local IS_FL       = game.PlaceId == 5938036553
 -- it has a Humanoid with health so it passes isAlive, but it can't be killed.
 -- IS_DEADWORLD gates the name-filter so the guard only runs in this one game.
 local IS_DEADWORLD = game.PlaceId == 93091759101123
-print("[NEXUS] PlaceId:", game.PlaceId, "| FL mode:", IS_FL, "| DeadWorld mode:", IS_DEADWORLD)
+local IS_BP        = game.PlaceId == 3527629287
+print("[NEXUS] PlaceId:", game.PlaceId, "| FL:", IS_FL, "| BP:", IS_BP, "| DeadWorld:", IS_DEADWORLD)
 
 -- container for Highlight instances (Highlight needs to live in the DataModel to render)
 local hlContainer = Instance.new("Folder")
@@ -87,6 +88,19 @@ local cfg = {
         size     = 180,
         range    = 150,
         fov_cone = true,  -- draw camera FOV wedge on the radar
+    },
+    bp = {
+        -- Big Paintball (3527629287) specific settings.
+        -- drop_comp: aim above target by 0.5*g*tof² to hit where gravity pulls
+        --            the bullet to by the time it arrives. tof = dist/velocity.
+        -- patch_velocity: require-mutates the gun module so every LocalScript in
+        --            the same Lua VM that required it sees the new velocity.
+        --            higher velocity = less drop = easier hitting distant targets.
+        -- patch_auto: turns semi-auto guns fully automatic via the same mutation.
+        drop_comp      = true,
+        patch_velocity = true,
+        patched_vel    = 400,   -- studs/s (vanilla is 235; 400 keeps it somewhat believable)
+        patch_auto     = false, -- flip to true to make the default gun auto
     },
     keys = {
         aim    = Enum.KeyCode.F1,   -- toggle aimbot on/off
@@ -338,6 +352,38 @@ local function getFLName(model)
         if (v.Name=="PlayerName" or v.Name=="Username") and v:IsA("StringValue") then return v.Value end
     end
     return model.Name == "soldier_model" and "Soldier" or model.Name
+end
+
+-- // ════════════════ BIG PAINTBALL ══════════════════════════ //
+-- Bullets travel at `velocity` studs/s and fall under workspace.Gravity.
+-- Drop over distance d: drop = 0.5 * g * (d/v)².
+-- We compensate by aiming that many studs ABOVE the target.
+--
+-- Gun module patch: require() caches module tables in the executor's Lua VM.
+-- Mutating the returned table changes what every subsequent require() sees,
+-- including the game's own LocalScripts — so patching velocity here makes
+-- the game actually fire bullets faster, not just our internal prediction.
+
+local BP_GUN_VELOCITY = 235  -- updated on startup by patchBPGun if patch_velocity = true
+
+local function patchBPGun()
+    if not IS_BP then return end
+    local rs  = game:GetService("ReplicatedStorage")
+    local ok, mod = pcall(require,
+        rs.Game.Guns["1 - Default"]["guns | Default"])
+    if not ok or type(mod) ~= "table" then
+        warn("[NEXUS BP] require failed:", mod); return
+    end
+    if cfg.bp.patch_velocity then
+        mod.velocity    = cfg.bp.patched_vel
+        BP_GUN_VELOCITY = cfg.bp.patched_vel
+    end
+    if cfg.bp.patch_auto then
+        mod.automatic = true
+        mod.shotrate  = 0.05
+    end
+    print(string.format("[NEXUS BP] gun patched — vel=%d  auto=%s",
+        mod.velocity, tostring(mod.automatic)))
 end
 
 -- // ════════ UNIVERSAL TEAM DETECTION ══════════════ //
@@ -974,6 +1020,10 @@ if IS_FL or cfg.misc.npc_mode then
     for obj in pairs(modelCache) do registerESP(obj) end
 end
 
+-- BP: patch gun module on a deferred thread so the game's own require cache
+-- is already populated before we mutate it (avoids a load-order race).
+if IS_BP then task.defer(patchBPGun) end
+
 conn(RunService.RenderStepped:Connect(tickESP))
 
 -- // ════════════════ AIMBOT ══════════════════════════ //
@@ -1222,14 +1272,29 @@ local function getLockedPos()
         part = part or root
     end
     if not part then return nil end
+    local basePos
     if cfg.aim.prediction then
         -- predict root (velocity lives on HRP), then re-add the part→root
         -- offset so we land on the predicted PART position, not root level.
         local rootPred   = predictedPos(lockedKey, root)
         local partOffset = part.Position - root.Position
-        return rootPred + partOffset
+        basePos = rootPred + partOffset
+    else
+        basePos = part.Position
     end
-    return part.Position
+    -- bullet drop compensation for Big Paintball.
+    -- paintball bullets fly at ~235 studs/s (or patched value) and arc down
+    -- under workspace.Gravity. to land on the target we must aim above by the
+    -- amount the bullet will have fallen by the time it arrives.
+    -- formula: drop = 0.5 * g * tof²   where tof = dist / velocity
+    if IS_BP and cfg.bp.drop_comp then
+        local dist    = (cam.CFrame.Position - root.Position).Magnitude
+        local vel     = math.max(BP_GUN_VELOCITY, 1)
+        local tof     = dist / vel
+        local drop    = 0.5 * workspace.Gravity * tof * tof
+        basePos = basePos + Vector3.new(0, drop, 0)
+    end
+    return basePos
 end
 
 RunService:BindToRenderStep("NexusAim", 999999, function(dt)
