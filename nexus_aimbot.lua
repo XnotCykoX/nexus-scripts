@@ -238,18 +238,38 @@ local function wallCheck(targetModel, targetPos)
     return false
 end
 
--- // ════════ FL PART RESOLVER ═══════════════════════ //
--- soldier_model uses TPVBodyVanilla* instead of standard R15 names.
--- these helpers let the rest of the code stay generic while FL gets
--- the right part for head-targeting, bounds, and FOV checks.
+-- // ════════ FL CHARACTER + TEAM HELPERS ════════════ //
+--
+-- In Frontlines, player.Character = "StarterCharacter" — a dummy Roblox character
+-- that sits at the wrong position (origin or underground). The real game character
+-- lives in workspace named after the player (workspace:FindFirstChild(plr.Name)).
+-- That workspace model has HumanoidRootPart, Humanoid, and the TPVBodyVanilla mesh.
+--
+-- Team detection: Frontlines uses the standard Roblox Teams service.
+-- player.TeamColor comparison is the reliable signal (same approach as the
+-- community Frontlines scripts). friendly_marker is not present on all builds.
 
-local function flHead(char)
-    -- prefer the TPV head mesh; fall back to "Head" for non-FL chars
-    return char:FindFirstChild("TPVBodyVanillaHead") or char:FindFirstChild("Head")
+local function getFLChar(plr)
+    -- always prefer the workspace model — StarterCharacter has no real world position
+    local ws = workspace:FindFirstChild(plr.Name)
+    if ws and ws:FindFirstChild("HumanoidRootPart") then return ws end
+    -- fallback to player.Character if workspace model isn't up yet
+    return plr.Character
 end
 
-local function flRoot(char)
-    return char:FindFirstChild("HumanoidRootPart")
+local function isFLTeammate(plr)
+    -- Roblox TeamColor: both players on the same team share the same BrickColor number.
+    -- BrickColor 194 = medium stone grey = "no team" default — treat as enemy.
+    local tc = plr.TeamColor
+    local myTc = lp.TeamColor
+    if not tc or not myTc then return false end
+    if tc.Number == 194 then return false end
+    return tc == myTc
+end
+
+local function flHead(char)
+    -- soldier_model uses TPVBodyVanillaHead instead of the standard "Head"
+    return char:FindFirstChild("TPVBodyVanillaHead") or char:FindFirstChild("Head")
 end
 
 -- // ══════════ FRONTLINES HELPERS ════════════════════ //
@@ -510,10 +530,18 @@ end
 
 local function isLockValid()
     if not lockedKey then return false end
-    local char, root, hum = getCharData(lockedKey)
-    if not (char and root and hum) then return false end
-    -- FL: skip Humanoid health check — StarterCharacter Health may be 0 (custom system).
-    -- game destroys the character on death, so char existence is the reliable signal.
+    local char, root, hum
+    if IS_FL and typeof(lockedKey) ~= "Instance" or
+       IS_FL and typeof(lockedKey) == "Instance" and lockedKey:IsA("Player") then
+        -- FL: get the real workspace character, not StarterCharacter
+        local plr = lockedKey
+        char = getFLChar(plr)
+        root = char and char:FindFirstChild("HumanoidRootPart")
+        hum  = char and char:FindFirstChildOfClass("Humanoid")
+    else
+        char, root, hum = getCharData(lockedKey)
+    end
+    if not (char and root) then return false end
     if not IS_FL and not isAlive(hum) then return false end
     local _, onScreen = cam:WorldToViewportPoint(root.Position)
     return onScreen
@@ -847,17 +875,15 @@ local function tickESP()
     -- is always reliable; modelCache event-based tracking was missing them entirely.
     for plr in pairs(pool) do
         if typeof(plr) ~= "Instance" or not plr:IsA("Player") then continue end
-        local char = plr.Character
+        local char = IS_FL and getFLChar(plr) or plr.Character
         local hum  = char and char:FindFirstChildOfClass("Humanoid")
         local root = char and char:FindFirstChild("HumanoidRootPart")
         local head = char and (IS_FL and flHead(char) or char:FindFirstChild("Head"))
         if not (char and root) then hideESP(pool[plr]); continue end
-        -- FL: StarterCharacter Humanoid.Health may be 0 (custom health system).
-        -- char existence is the reliable alive signal — game destroys char on death.
         if not IS_FL and not isAlive(hum) then hideESP(pool[plr]); continue end
         if IS_DEADWORLD and char.Name == "HumanBody" then hideESP(pool[plr]); continue end
         if IS_FL and cfg.esp.team_check then
-            if char:FindFirstChild("friendly_marker") then hideESP(pool[plr]); continue end
+            if isFLTeammate(plr) then hideESP(pool[plr]); continue end
         elseif cfg.esp.team_check then
             local mine  = getSignals(lp,  lp,  lp.Character)
             local their = getSignals(plr, plr, char)
@@ -1016,13 +1042,13 @@ local function findBestTarget()
         end
     end
 
-    -- scan real players — in FL mode their .Character IS the soldier_model
+    -- scan real players — in FL mode use workspace model (real position), not StarterCharacter
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr == lp then continue end
-        local char = plr.Character
-        if IS_FL and cfg.aim.team_check then
-            if char and char:FindFirstChild("friendly_marker") then continue end
-        elseif cfg.aim.team_check then
+        if IS_FL and cfg.aim.team_check and isFLTeammate(plr) then continue end
+        local char = IS_FL and getFLChar(plr) or plr.Character
+        if IS_FL and not char then continue end
+        if not IS_FL and cfg.aim.team_check then
             local mine  = getSignals(lp,  lp,  lp.Character)
             local their = getSignals(plr, plr, char)
             if next(mine) and sigMatch(mine, their) then continue end
@@ -1130,11 +1156,23 @@ local function pickSmartPart(key, char, root)
 end
 
 local function getLockedPos()
-    local char, root, hum, head = getCharData(lockedKey)
-    if not (char and root and hum) then return nil end
+    local char, root, hum, head
+    if IS_FL and typeof(lockedKey) == "Instance" and lockedKey:IsA("Player") then
+        -- FL: resolve workspace character (real position), not StarterCharacter
+        char = getFLChar(lockedKey)
+        root = char and char:FindFirstChild("HumanoidRootPart")
+        hum  = char and char:FindFirstChildOfClass("Humanoid")
+        head = char and flHead(char)
+    else
+        char, root, hum, head = getCharData(lockedKey)
+    end
+    if not (char and root) then return nil end
     local part, selectedName
-    if typeof(lockedKey) == "Instance" and lockedKey:IsA("Model") then
-        -- NPC/FL model — head or root, no smart picking needed
+    if IS_FL then
+        -- FL: aim at TPVBodyVanillaHead, fall back to root
+        part = head or root
+    elseif typeof(lockedKey) == "Instance" and lockedKey:IsA("Model") then
+        -- NPC model — head or root, no smart picking needed
         part = head or root
     else
         -- visibility-aware dynamic part selection
