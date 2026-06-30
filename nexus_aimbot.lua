@@ -189,7 +189,7 @@ local function shouldTrack(obj)
     local hum  = obj:FindFirstChildOfClass("Humanoid")
     local root = obj:FindFirstChild("HumanoidRootPart")
     if not (hum and root) then return false end
-    if IS_FL then return obj.Name == "soldier_model" end
+    -- FL mode uses the Players service directly — no modelCache needed.
     if cfg.misc.npc_mode then return (not isPlayerChar(obj)) and obj ~= lp.Character end
     return false
 end
@@ -236,6 +236,20 @@ local function wallCheck(targetModel, targetPos)
     if targetModel:IsAncestorOf(result.Instance) then return true end
     if result.Instance.Transparency >= 0.9 then return true end
     return false
+end
+
+-- // ════════ FL PART RESOLVER ═══════════════════════ //
+-- soldier_model uses TPVBodyVanilla* instead of standard R15 names.
+-- these helpers let the rest of the code stay generic while FL gets
+-- the right part for head-targeting, bounds, and FOV checks.
+
+local function flHead(char)
+    -- prefer the TPV head mesh; fall back to "Head" for non-FL chars
+    return char:FindFirstChild("TPVBodyVanillaHead") or char:FindFirstChild("Head")
+end
+
+local function flRoot(char)
+    return char:FindFirstChild("HumanoidRootPart")
 end
 
 -- // ══════════ FRONTLINES HELPERS ════════════════════ //
@@ -816,7 +830,7 @@ end
 
 local function tickESP()
     local now = tick()
-    if (IS_FL or cfg.misc.npc_mode) and (now - cacheRebuildT) >= 3 then
+    if cfg.misc.npc_mode and (now - cacheRebuildT) >= 3 then
         cacheRebuildT = now
         task.spawn(rebuildModelCache)
     end
@@ -826,27 +840,29 @@ local function tickESP()
         return
     end
 
-    -- always draw ESP for real players (skip in FL mode where pool uses models)
-    if not IS_FL then
-        for plr in pairs(pool) do
-            if typeof(plr) ~= "Instance" or not plr:IsA("Player") then continue end
-            local char = plr.Character
-            local hum  = char and char:FindFirstChildOfClass("Humanoid")
-            local root = char and char:FindFirstChild("HumanoidRootPart")
-            local head = char and char:FindFirstChild("Head")
-            if not (char and hum and root) or not isAlive(hum) then hideESP(pool[plr]); continue end
-            if IS_DEADWORLD and char.Name == "HumanBody" then hideESP(pool[plr]); continue end
-            if cfg.esp.team_check then
-                local mine  = getSignals(lp,  lp,  lp.Character)
-                local their = getSignals(plr, plr, char)
-                if next(mine) and sigMatch(mine, their) then hideESP(pool[plr]); continue end
-            end
-            drawESP(plr, char, hum, root, head, plr.DisplayName)
+    -- draw ESP for all real players.
+    -- in FL mode their .Character IS the soldier_model — scanning via Players service
+    -- is always reliable; modelCache event-based tracking was missing them entirely.
+    for plr in pairs(pool) do
+        if typeof(plr) ~= "Instance" or not plr:IsA("Player") then continue end
+        local char = plr.Character
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local head = char and (IS_FL and flHead(char) or char:FindFirstChild("Head"))
+        if not (char and hum and root) or not isAlive(hum) then hideESP(pool[plr]); continue end
+        if IS_DEADWORLD and char.Name == "HumanBody" then hideESP(pool[plr]); continue end
+        if IS_FL and cfg.esp.team_check then
+            if char:FindFirstChild("friendly_marker") then hideESP(pool[plr]); continue end
+        elseif cfg.esp.team_check then
+            local mine  = getSignals(lp,  lp,  lp.Character)
+            local their = getSignals(plr, plr, char)
+            if next(mine) and sigMatch(mine, their) then hideESP(pool[plr]); continue end
         end
+        drawESP(plr, char, hum, root, head, plr.DisplayName)
     end
 
-    -- additionally draw ESP for NPC/bot modelCache when npc_mode (or FL)
-    if IS_FL or cfg.misc.npc_mode then
+    -- additionally draw ESP for NPC/bot modelCache when npc_mode
+    if cfg.misc.npc_mode then
         local myModel = IS_FL and getLocalFLModel() or lp.Character
         -- FL uses friendly_marker child for team detection — getFLTeam attribute
         -- scanning returns garbage in Frontlines so myTeam is only for npc_mode games.
@@ -881,16 +897,14 @@ local function tickESP()
     end
 end
 
--- always register real players and wire join/leave events
-if not IS_FL then
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= lp then registerESP(p) end
-    end
-    conn(Players.PlayerAdded:Connect(function(p) if p ~= lp then registerESP(p) end end))
-    conn(Players.PlayerRemoving:Connect(destroyESP))
+-- register real players and wire join/leave events (all modes including FL)
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= lp then registerESP(p) end
 end
--- additionally seed NPC/bot cache when npc_mode (or FL)
-if IS_FL or cfg.misc.npc_mode then
+conn(Players.PlayerAdded:Connect(function(p) if p ~= lp then registerESP(p) end end))
+conn(Players.PlayerRemoving:Connect(destroyESP))
+-- seed NPC/bot modelCache for npc_mode only (FL uses Players service now)
+if cfg.misc.npc_mode then
     rebuildModelCache()
     for obj in pairs(modelCache) do registerESP(obj) end
 end
@@ -993,36 +1007,33 @@ local function findBestTarget()
         end
     end
 
-    -- always scan real players
-    if not IS_FL then
-        for _, plr in ipairs(Players:GetPlayers()) do
-            if plr == lp then continue end
-            local char = plr.Character
-            if cfg.aim.team_check then
-                local mine  = getSignals(lp,  lp,  lp.Character)
-                local their = getSignals(plr, plr, char)
-                if next(mine) and sigMatch(mine, their) then continue end
-            end
-            local hum  = char and char:FindFirstChildOfClass("Humanoid")
-            local root = char and char:FindFirstChild("HumanoidRootPart")
-            local head = char and char:FindFirstChild("Head")
-            tryKey(plr, char, root, hum, head)
+    -- scan real players — in FL mode their .Character IS the soldier_model
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr == lp then continue end
+        local char = plr.Character
+        if IS_FL and cfg.aim.team_check then
+            if char and char:FindFirstChild("friendly_marker") then continue end
+        elseif cfg.aim.team_check then
+            local mine  = getSignals(lp,  lp,  lp.Character)
+            local their = getSignals(plr, plr, char)
+            if next(mine) and sigMatch(mine, their) then continue end
         end
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local head = char and (IS_FL and flHead(char) or char:FindFirstChild("Head"))
+        tryKey(plr, char, root, hum, head)
     end
 
-    -- additionally scan NPC/bot modelCache when npc_mode is on (or in FL mode)
-    if IS_FL or cfg.misc.npc_mode then
-        local myModel = IS_FL and getLocalFLModel() or lp.Character
-        local myTeam  = (not IS_FL and myModel) and getFLTeam(myModel) or nil
+    -- additionally scan NPC/bot modelCache when npc_mode is on
+    if cfg.misc.npc_mode then
+        local myModel = lp.Character
+        local myTeam  = myModel and getFLTeam(myModel) or nil
         for obj in pairs(modelCache) do
             if obj == myModel then continue end
             if IS_DEADWORLD and obj.Name == "HumanBody" then continue end
             local root = obj:FindFirstChild("HumanoidRootPart")
             local hum  = obj:FindFirstChildOfClass("Humanoid")
-            if IS_FL and cfg.aim.team_check then
-                -- friendly_marker child flags the model as a teammate → skip
-                if obj:FindFirstChild("friendly_marker") then continue end
-            elseif cfg.aim.team_check and myTeam then
+            if cfg.aim.team_check and myTeam then
                 local their = getFLTeam(obj)
                 if their and their == myTeam then continue end
             end
@@ -2781,10 +2792,9 @@ conn(RunService.Heartbeat:Connect(function()
         placeDot(plr, root.Position, col, isLocked)
     end
 
-    if IS_FL or cfg.misc.npc_mode then
-        local myModel = IS_FL and getLocalFLModel and getLocalFLModel() or myChar
+    if cfg.misc.npc_mode then
         for obj in pairs(modelCache) do
-            if obj == myModel then continue end
+            if obj == myChar then continue end
             local root = obj:FindFirstChild("HumanoidRootPart")
             local hum  = obj:FindFirstChildOfClass("Humanoid")
             if not (root and isAlive(hum)) then continue end
