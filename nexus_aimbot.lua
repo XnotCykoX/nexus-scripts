@@ -244,6 +244,17 @@ getLocalFLModel = function()
     local now = tick()
     if myModelCached and (now - myModelStamp) < 0.5 then return myModelCached end
     myModelStamp = now
+
+    -- FL primary: the local player's character in Frontlines is a Model named
+    -- "StarterPlayer" in workspace. find by name — unlike a numeric index this
+    -- doesn't shift if workspace children are added or removed before it loads.
+    local starterPlayer = workspace:FindFirstChild("StarterPlayer")
+    if starterPlayer and starterPlayer:IsA("Model")
+       and starterPlayer:FindFirstChildOfClass("Humanoid") then
+        myModelCached = starterPlayer; return starterPlayer
+    end
+
+    -- fallback: camera subject walk-up (spectating, death-cam, late spawn)
     local subject = cam.CameraSubject
     if subject then
         local cur = subject
@@ -254,6 +265,8 @@ getLocalFLModel = function()
             cur = p
         end
     end
+
+    -- last resort: nearest soldier_model in cache
     local best, bestD = nil, 25
     for obj in pairs(modelCache) do
         local root = obj:FindFirstChild("HumanoidRootPart")
@@ -835,7 +848,9 @@ local function tickESP()
     -- additionally draw ESP for NPC/bot modelCache when npc_mode (or FL)
     if IS_FL or cfg.misc.npc_mode then
         local myModel = IS_FL and getLocalFLModel() or lp.Character
-        local myTeam  = (IS_FL and myModel) and getFLTeam(myModel) or nil
+        -- FL uses friendly_marker child for team detection — getFLTeam attribute
+        -- scanning returns garbage in Frontlines so myTeam is only for npc_mode games.
+        local myTeam  = (not IS_FL and myModel) and getFLTeam(myModel) or nil
         local active  = {}
 
         for obj in pairs(modelCache) do
@@ -848,7 +863,10 @@ local function tickESP()
             if not (root and hum) then continue end
             registerESP(obj); active[obj] = true
             if not isAlive(hum) then hideESP(pool[obj]); continue end
-            if cfg.esp.team_check and myTeam then
+            if IS_FL and cfg.esp.team_check then
+                -- friendly soldiers carry a friendly_marker child; enemies don't
+                if obj:FindFirstChild("friendly_marker") then hideESP(pool[obj]); continue end
+            elseif cfg.esp.team_check and myTeam then
                 local their = getFLTeam(obj)
                 if their and their == myTeam then hideESP(pool[obj]); continue end
             end
@@ -995,13 +1013,16 @@ local function findBestTarget()
     -- additionally scan NPC/bot modelCache when npc_mode is on (or in FL mode)
     if IS_FL or cfg.misc.npc_mode then
         local myModel = IS_FL and getLocalFLModel() or lp.Character
-        local myTeam  = (IS_FL and myModel) and getFLTeam(myModel) or nil
+        local myTeam  = (not IS_FL and myModel) and getFLTeam(myModel) or nil
         for obj in pairs(modelCache) do
             if obj == myModel then continue end
             if IS_DEADWORLD and obj.Name == "HumanBody" then continue end
             local root = obj:FindFirstChild("HumanoidRootPart")
             local hum  = obj:FindFirstChildOfClass("Humanoid")
-            if cfg.aim.team_check and myTeam then
+            if IS_FL and cfg.aim.team_check then
+                -- friendly_marker child flags the model as a teammate → skip
+                if obj:FindFirstChild("friendly_marker") then continue end
+            elseif cfg.aim.team_check and myTeam then
                 local their = getFLTeam(obj)
                 if their and their == myTeam then continue end
             end
