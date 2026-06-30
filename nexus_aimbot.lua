@@ -100,7 +100,7 @@ local cfg = {
         drop_comp      = true,
         patch_velocity = true,
         patched_vel    = 400,   -- studs/s (vanilla is 235; 400 keeps it somewhat believable)
-        patch_auto     = false, -- flip to true to make the default gun auto
+        patch_auto     = true,  -- patch automatic = true (semi → auto)
     },
     keys = {
         aim    = Enum.KeyCode.F1,   -- toggle aimbot on/off
