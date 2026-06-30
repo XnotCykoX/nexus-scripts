@@ -715,9 +715,31 @@ local function hideESP(o)
     if o.hl then o.hl.Enabled=false end
 end
 
-local function getBounds(root, head)
-    local topY = head and (head.Position.Y + head.Size.Y*0.55) or (root.Position.Y + 3.2)
-    local botY = root.Position.Y - 2.8
+local function getBounds(root, head, model)
+    local topY, botY
+    if IS_FL and model then
+        -- FL: hardcoded offsets from HRP are wrong when crouching — HRP anchor
+        -- doesn't move proportionally as the mesh parts lower. scan every BasePart
+        -- child for the real occupied Y range so the box shrinks correctly.
+        topY = -math.huge
+        botY =  math.huge
+        for _, part in ipairs(model:GetChildren()) do
+            if part:IsA("BasePart") then
+                local halfH = part.Size.Y * 0.5
+                local py    = part.Position.Y
+                if py + halfH > topY then topY = py + halfH end
+                if py - halfH < botY then botY = py - halfH end
+            end
+        end
+        -- no parts found (race condition on spawn) — fall through to defaults
+        if topY == -math.huge then
+            topY = head and (head.Position.Y + head.Size.Y*0.55) or (root.Position.Y + 3.2)
+            botY = root.Position.Y - 2.8
+        end
+    else
+        topY = head and (head.Position.Y + head.Size.Y*0.55) or (root.Position.Y + 3.2)
+        botY = root.Position.Y - 2.8
+    end
     local cx, cz = root.Position.X, root.Position.Z
     local cr  = cam.CFrame.RightVector
     local rxz = Vector3.new(cr.X, 0, cr.Z)
@@ -737,7 +759,7 @@ local function drawESP(key, char, hum, root, head, label)
     local rsp, onScreen = cam:WorldToViewportPoint(root.Position)
     if not onScreen then hideESP(o); return end
 
-    local bx, by, bw, bh = getBounds(root, head)
+    local bx, by, bw, bh = getBounds(root, head, IS_FL and char or nil)
     local dst = (cam.CFrame.Position - root.Position).Magnitude
     local now = tick()
 
