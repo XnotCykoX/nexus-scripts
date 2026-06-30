@@ -15,8 +15,12 @@ local mouse = lp:GetMouse()
 local cam   = workspace.CurrentCamera
 local INSET = GuiService:GetGuiInset()
 
-local IS_FL = game.PlaceId == 5938036553
-print("[NEXUS] PlaceId:", game.PlaceId, "| FL mode:", IS_FL)
+local IS_FL       = game.PlaceId == 5938036553
+-- in this game dead players leave a persistent "HumanBody" model in workspace.
+-- it has a Humanoid with health so it passes isAlive, but it can't be killed.
+-- IS_DEADWORLD gates the name-filter so the guard only runs in this one game.
+local IS_DEADWORLD = game.PlaceId == 93091759101123
+print("[NEXUS] PlaceId:", game.PlaceId, "| FL mode:", IS_FL, "| DeadWorld mode:", IS_DEADWORLD)
 
 -- container for Highlight instances (Highlight needs to live in the DataModel to render)
 local hlContainer = Instance.new("Folder")
@@ -818,6 +822,7 @@ local function tickESP()
             local root = char and char:FindFirstChild("HumanoidRootPart")
             local head = char and char:FindFirstChild("Head")
             if not (char and hum and root) or not isAlive(hum) then hideESP(pool[plr]); continue end
+            if IS_DEADWORLD and char.Name == "HumanBody" then hideESP(pool[plr]); continue end
             if cfg.esp.team_check then
                 local mine  = getSignals(lp,  lp,  lp.Character)
                 local their = getSignals(plr, plr, char)
@@ -835,6 +840,9 @@ local function tickESP()
 
         for obj in pairs(modelCache) do
             if obj == myModel then continue end
+            -- DeadWorld: ignore the undead corpse model entirely — don't even
+            -- register it so it never gets an ESP pool entry to leak through.
+            if IS_DEADWORLD and obj.Name == "HumanBody" then continue end
             local root = obj:FindFirstChild("HumanoidRootPart")
             local hum  = obj:FindFirstChildOfClass("Humanoid")
             if not (root and hum) then continue end
@@ -952,6 +960,10 @@ local function findBestTarget()
     -- not here — this function's only job is to find the closest valid target.
     local function tryKey(key, char, root, hum, fovPart)
         if not (root and isAlive(hum)) then return end
+        -- in DeadWorld: skip the persistent corpse model left when players die.
+        -- "HumanBody" has a live Humanoid so isAlive passes, but it's not a
+        -- valid target — it's immune and counts as griefing the lock queue.
+        if IS_DEADWORLD and char and char.Name == "HumanBody" then return end
         local checkPos = fovPart and fovPart.Position or root.Position
         if cfg.aim.vis_check and not wallCheck(char, checkPos) then return end
         local sp, onScreen = cam:WorldToViewportPoint(checkPos)
@@ -986,6 +998,7 @@ local function findBestTarget()
         local myTeam  = (IS_FL and myModel) and getFLTeam(myModel) or nil
         for obj in pairs(modelCache) do
             if obj == myModel then continue end
+            if IS_DEADWORLD and obj.Name == "HumanBody" then continue end
             local root = obj:FindFirstChild("HumanoidRootPart")
             local hum  = obj:FindFirstChildOfClass("Humanoid")
             if cfg.aim.team_check and myTeam then
