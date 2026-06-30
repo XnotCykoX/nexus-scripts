@@ -512,7 +512,9 @@ local function isLockValid()
     if not lockedKey then return false end
     local char, root, hum = getCharData(lockedKey)
     if not (char and root and hum) then return false end
-    if not isAlive(hum) then return false end
+    -- FL: skip Humanoid health check — StarterCharacter Health may be 0 (custom system).
+    -- game destroys the character on death, so char existence is the reliable signal.
+    if not IS_FL and not isAlive(hum) then return false end
     local _, onScreen = cam:WorldToViewportPoint(root.Position)
     return onScreen
 end
@@ -849,7 +851,10 @@ local function tickESP()
         local hum  = char and char:FindFirstChildOfClass("Humanoid")
         local root = char and char:FindFirstChild("HumanoidRootPart")
         local head = char and (IS_FL and flHead(char) or char:FindFirstChild("Head"))
-        if not (char and hum and root) or not isAlive(hum) then hideESP(pool[plr]); continue end
+        if not (char and root) then hideESP(pool[plr]); continue end
+        -- FL: StarterCharacter Humanoid.Health may be 0 (custom health system).
+        -- char existence is the reliable alive signal — game destroys char on death.
+        if not IS_FL and not isAlive(hum) then hideESP(pool[plr]); continue end
         if IS_DEADWORLD and char.Name == "HumanBody" then hideESP(pool[plr]); continue end
         if IS_FL and cfg.esp.team_check then
             if char:FindFirstChild("friendly_marker") then hideESP(pool[plr]); continue end
@@ -990,8 +995,12 @@ local function findBestTarget()
     -- targets whose head is inside the circle but waist falls outside.
     -- the randomly chosen aim part (lockedPart) is applied in getLockedPos,
     -- not here — this function's only job is to find the closest valid target.
-    local function tryKey(key, char, root, hum, fovPart)
-        if not (root and isAlive(hum)) then return end
+    local function tryKey(key, char, root, hum, fovPart, skipAlive)
+        if not root then return end
+        -- skipAlive: FL mode — StarterCharacter Humanoid.Health may be 0 because
+        -- Frontlines uses its own health system. trust char existence instead;
+        -- the game destroys/replaces the character on actual death.
+        if not skipAlive and not isAlive(hum) then return end
         -- in DeadWorld: skip the persistent corpse model left when players die.
         -- "HumanBody" has a live Humanoid so isAlive passes, but it's not a
         -- valid target — it's immune and counts as griefing the lock queue.
@@ -1021,7 +1030,7 @@ local function findBestTarget()
         local hum  = char and char:FindFirstChildOfClass("Humanoid")
         local root = char and char:FindFirstChild("HumanoidRootPart")
         local head = char and (IS_FL and flHead(char) or char:FindFirstChild("Head"))
-        tryKey(plr, char, root, hum, head)
+        tryKey(plr, char, root, hum, head, IS_FL)
     end
 
     -- additionally scan NPC/bot modelCache when npc_mode is on
