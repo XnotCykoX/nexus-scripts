@@ -1651,29 +1651,12 @@ end)
 -- cam.CFrame write before the frame is committed to the GPU, so no game
 -- camera script can override it regardless of what BindToRenderStep priority
 -- they bind at or whether they use RenderStepped:Connect themselves.
-conn(RunService.RenderStepped:Connect(function()
-    if fps_aimPos then
-        -- Recompute CFrame from CURRENT camera position so any game-driven
-        -- position drift (FPS head-bob, ADS offset, etc.) is absorbed.
-        local cf = CFrame.new(cam.CFrame.Position, fps_aimPos)
-        cam.CFrame = cam.CFrame:Lerp(cf, fps_alpha or 1)
-        fps_aimPos = nil  -- consume — next frame must be re-set by BindToRenderStep
-    end
-end))
-
 -- // ════════════ ANTI-RECOIL ════════════════════════ //
--- Pitch enforcement approach: snap the camera's vertical angle at the moment
--- LMB is pressed, then enforce that exact pitch every frame after the game's
--- own camera script has run (priority 200).  No drift measurement needed —
--- we just overwrite whatever the game did to the camera's Y axis.
---
--- Why not measure-and-correct: RenderStepped fires BEFORE BindToRenderStep,
--- so if the game applies recoil in RenderStepped a capture-then-correct loop
--- always sees zero drift and does nothing.  Enforcement sidesteps this entirely.
---
--- ar_strength: 1.0 = crosshair frozen (perfect), 0.5 = half-corrected.
--- Fires at priority 999998 — after game camera (200), before aimbot (999999).
--- If aimbot has a lock it owns the camera; anti-recoil returns immediately.
+-- Snap the camera's pitch at LMB press; release it when LMB is released.
+-- Enforcement happens inside the existing RenderStepped post-pass below —
+-- the SAME absolute-final slot the aimbot uses — so the game cannot override
+-- it regardless of BindToRenderStep priority or RenderStepped ordering.
+-- ar_strength: 1.0 = pitch frozen (perfect), 0.5 = half correction.
 
 conn(UIS.InputBegan:Connect(function(i, gpe)
     if gpe or i.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
@@ -1689,23 +1672,31 @@ conn(UIS.InputEnded:Connect(function(i)
     end
 end))
 
-RunService:BindToRenderStep("NexusAntiRecoil", 999998, function()
-    if not cfg.misc.anti_recoil then arLockedPitch = nil; return end
-    if lockedKey                 then arLockedPitch = nil; return end
-    if not arLockedPitch         then return end
-    if not UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-        arLockedPitch = nil; return
+conn(RunService.RenderStepped:Connect(function()
+    if fps_aimPos then
+        -- Recompute CFrame from CURRENT camera position so any game-driven
+        -- position drift (FPS head-bob, ADS offset, etc.) is absorbed.
+        local cf = CFrame.new(cam.CFrame.Position, fps_aimPos)
+        cam.CFrame = cam.CFrame:Lerp(cf, fps_alpha or 1)
+        fps_aimPos = nil  -- consume — next frame must be re-set by BindToRenderStep
     end
-    local rx, ry, _ = cam.CFrame:ToEulerAnglesYXZ()
-    -- ar_strength 1.0 = fully locked pitch; 0 = no correction
-    local target = arLockedPitch + (rx - arLockedPitch) * (1 - cfg.misc.ar_strength)
-    cam.CFrame   = CFrame.new(cam.CFrame.Position) * CFrame.fromEulerAnglesYXZ(target, ry, 0)
-    -- nudge the game's internal mouse-look accumulator so recoil doesn't re-apply next frame
-    local corrDeg = math.deg(rx - target)
-    if corrDeg > 0.001 and UIS.MouseBehavior == Enum.MouseBehavior.LockCenter then
-        pcall(mousemoverel, 0, corrDeg * 2)
+    -- anti-recoil enforcement: runs in this same FIFO-last slot so nothing
+    -- can override it after us.  skipped whenever the aimbot has an active
+    -- lock (fps_aimPos already owns the camera for this frame).
+    if cfg.misc.anti_recoil and arLockedPitch and not lockedKey
+       and UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+        local rx, ry, _ = cam.CFrame:ToEulerAnglesYXZ()
+        local target = arLockedPitch + (rx - arLockedPitch) * (1 - cfg.misc.ar_strength)
+        if math.abs(rx - target) > 0.0001 then
+            cam.CFrame = CFrame.new(cam.CFrame.Position) * CFrame.fromEulerAnglesYXZ(target, ry, 0)
+            -- nudge the game's mouse accumulator so next-frame recoil can't re-accumulate
+            local corrDeg = math.deg(rx - target)
+            if corrDeg > 0.001 then
+                pcall(mousemoverel, 0, corrDeg * 2)
+            end
+        end
     end
-end)
+end))
 
 -- // ════════════════ SPRINT ══════════════════════════ //
 
