@@ -1695,9 +1695,12 @@ conn(RunService.RenderStepped:Connect(function()
         if arPrevRx and arSens
            and UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
             local dpitch   = rx - arPrevRx            -- total vertical change this frame
-            local intended = dy * arSens               -- player's intentional pitch (dy>0 = look down)
-            local recoil   = dpitch - intended         -- negative = unwanted upward drift
-            if recoil < -0.0002 then
+            -- in roblox: positive rx = looking UP, so mouse-down (dy>0) → rx decreases.
+            -- intended must carry the opposite sign to dy: -dy*sens gives the correct
+            -- expected dpitch direction. recoil = upward drift = positive residual.
+            local intended = -dy * arSens              -- player's intended pitch change
+            local recoil   = dpitch - intended         -- positive = unwanted upward drift
+            if recoil > 0.0002 then
                 local corrRx = rx - recoil * cfg.misc.ar_strength
                 cam.CFrame   = CFrame.new(cam.CFrame.Position) * CFrame.fromEulerAnglesYXZ(corrRx, ry, 0)
                 arPrevRx = corrRx
