@@ -82,6 +82,8 @@ local cfg = {
         noclip       = false,  -- disable character collision
         prox_alarm   = false,  -- screen-edge pulse when enemy is close
         prox_dist    = 30,     -- studs threshold for proximity alarm
+        anti_recoil  = false,  -- pitch camera down to counter vertical recoil
+        ar_strength  = 0.35,   -- degrees of correction per frame at 60 fps
     },
     minimap = {
         enabled  = false,
@@ -103,10 +105,11 @@ local cfg = {
         patch_auto     = true,  -- patch automatic = true (semi → auto)
     },
     keys = {
-        aim    = Enum.KeyCode.F1,   -- toggle aimbot on/off
-        esp    = Enum.KeyCode.F2,   -- toggle ESP on/off
-        bhop   = Enum.KeyCode.F3,   -- toggle bhop on/off
-        noclip = Enum.KeyCode.F4,   -- toggle noclip on/off
+        aim         = Enum.KeyCode.F1,   -- toggle aimbot on/off
+        esp         = Enum.KeyCode.F2,   -- toggle ESP on/off
+        bhop        = Enum.KeyCode.F3,   -- toggle bhop on/off
+        noclip      = Enum.KeyCode.F4,   -- toggle noclip on/off
+        anti_recoil = Enum.KeyCode.F5,   -- toggle anti-recoil on/off
     },
 }
 
@@ -1657,6 +1660,31 @@ conn(RunService.RenderStepped:Connect(function()
     end
 end))
 
+-- // ════════════ ANTI-RECOIL ════════════════════════ //
+-- Pitches the camera downward each frame while LMB is held to counteract
+-- vertical recoil. Fully independent of the aimbot — works with it off.
+-- When the aimbot has an active lock (lockedKey ~= nil) it already owns
+-- the camera, so anti-recoil yields to avoid fighting it.
+--
+-- ar_strength = degrees of downward correction per frame at 60 fps.
+-- Tune upward for heavy recoil guns, downward for small-recoil weapons.
+-- Runs at BindToRenderStep priority 999998 — one below the aimbot (999999)
+-- so the aimbot always wins the final CFrame write when both are active.
+
+RunService:BindToRenderStep("NexusAntiRecoil", 999998, function(dt)
+    if not cfg.misc.anti_recoil then return end
+    if not UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then return end
+    -- yield to aimbot lock — it controls the camera and anti-recoil would fight it
+    if lockedKey then return end
+    local deg = cfg.misc.ar_strength * dt * 60   -- framerate-independent correction
+    -- direct CFrame pitch
+    cam.CFrame = cam.CFrame * CFrame.Angles(math.rad(-deg), 0, 0)
+    -- nudge the game's internal accumulated look-angle for FPS mouse-lock games
+    if UIS.MouseBehavior == Enum.MouseBehavior.LockCenter then
+        pcall(mousemoverel, 0, deg * 2.5)
+    end
+end)
+
 -- // ════════════════ SPRINT ══════════════════════════ //
 
 conn(RunService.Heartbeat:Connect(function()
@@ -1702,10 +1730,11 @@ end))
 conn(UIS.InputBegan:Connect(function(i, gpe)
     if gpe or i.UserInputType ~= Enum.UserInputType.Keyboard then return end
     local k = i.KeyCode
-    if k == cfg.keys.aim    then cfg.aim.enabled  = not cfg.aim.enabled  end
-    if k == cfg.keys.esp    then cfg.esp.enabled  = not cfg.esp.enabled  end
-    if k == cfg.keys.bhop   then cfg.misc.bhop    = not cfg.misc.bhop    end
-    if k == cfg.keys.noclip then cfg.misc.noclip  = not cfg.misc.noclip  end
+    if k == cfg.keys.aim         then cfg.aim.enabled        = not cfg.aim.enabled        end
+    if k == cfg.keys.esp         then cfg.esp.enabled        = not cfg.esp.enabled        end
+    if k == cfg.keys.bhop        then cfg.misc.bhop          = not cfg.misc.bhop          end
+    if k == cfg.keys.noclip      then cfg.misc.noclip        = not cfg.misc.noclip        end
+    if k == cfg.keys.anti_recoil then cfg.misc.anti_recoil   = not cfg.misc.anti_recoil   end
 end))
 
 -- // ═══════════════ MAGIC BULLET ════════════════════ //
