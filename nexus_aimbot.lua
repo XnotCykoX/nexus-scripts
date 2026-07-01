@@ -251,10 +251,19 @@ local function wallCheck(targetModel, targetPos)
     local ok, params = pcall(RaycastParams.new)
     if not ok then return true end
     params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = myChar and {myChar} or {}
+    -- Exclude BOTH own character AND the target model from the cast.
+    -- Old approach: only excluded myChar, then post-checked IsAncestorOf.
+    -- FL problem: soldier_models have weapons and accessories that physically
+    -- clip through thin walls. the ray hits an accessory part, IsAncestorOf
+    -- fires true, and the target is marked "visible" while their body is
+    -- fully behind cover. excluding the target entirely and checking only
+    -- whether any OTHER geometry blocks the path is far more reliable.
+    local excl = {}
+    if myChar       then excl[#excl+1] = myChar       end
+    if targetModel  then excl[#excl+1] = targetModel  end
+    params.FilterDescendantsInstances = excl
     local result = workspace:Raycast(cam.CFrame.Position, targetPos - cam.CFrame.Position, params)
     if not result then return true end
-    if targetModel:IsAncestorOf(result.Instance) then return true end
     if result.Instance.Transparency >= 0.9 then return true end
     return false
 end
@@ -294,38 +303,33 @@ local function flHead(char)
 end
 
 -- ordered list of FL body parts to try as aim targets.
--- priority: head first, then torso, then arms, then root as last resort.
+-- torso-first: large hit region, reliable centre-mass contact.
+-- head listed second so wall peeks (torso hidden) fall through to head.
 local FL_BODY_PARTS = {
-    "TPVBodyVanillaHead",
     "TPVBodyVanillaTorsoFront",
+    "TPVBodyVanillaHead",
     "TPVBodyVanillaTorsoBack",
     "TPVBodyVanillaArmL",
     "TPVBodyVanillaArmR",
     "HumanoidRootPart",
 }
 
--- picks the highest on-screen FL body part, naturally adapting to pose:
---   standing  → TPVBodyVanillaHead (highest on screen)
---   crouching → TPVBodyVanillaHead (still highest, just lower on screen)
---   sliding   → TPVBodyVanillaTorsoFront (head near floor, torso is now highest)
---   wall peek → whichever part clears the cover first
--- "highest on screen" = lowest screen-space Y value.
--- this replaces the old `flHead(char) or root` fallback which silently
--- resolved to HumanoidRootPart when TPVBodyVanillaHead was missing,
--- causing the aimbot to aim at waist-level inside the body mesh.
+-- returns the first FL body part that is on-screen, in FL_BODY_PARTS order.
+-- order-based priority means:
+--   standing / crouching / sliding → TorsoFront (always on screen, centre mass)
+--   wall peek (torso behind cover)  → Head (falls through to first visible part)
+--   last resort                     → HumanoidRootPart
+-- previously used "lowest screen Y" (highest part) which always picked the
+-- head, causing the aimbot to aim above where bullets actually register.
 local function pickFLAimPart(char, root)
-    local bestPart, bestScrY = root, math.huge
     for _, pName in ipairs(FL_BODY_PARTS) do
         local p = char:FindFirstChild(pName)
         if p then
-            local sp, onScreen = cam:WorldToViewportPoint(p.Position)
-            if onScreen and sp.Y < bestScrY then
-                bestScrY = sp.Y
-                bestPart = p
-            end
+            local _, onScreen = cam:WorldToViewportPoint(p.Position)
+            if onScreen then return p end
         end
     end
-    return bestPart
+    return root
 end
 
 -- // ══════════ FRONTLINES HELPERS ════════════════════ //
