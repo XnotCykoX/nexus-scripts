@@ -1652,25 +1652,11 @@ end)
 -- camera script can override it regardless of what BindToRenderStep priority
 -- they bind at or whether they use RenderStepped:Connect themselves.
 -- // ════════════ ANTI-RECOIL ════════════════════════ //
--- Snap the camera's pitch at LMB press; release it when LMB is released.
--- Enforcement happens inside the existing RenderStepped post-pass below —
--- the SAME absolute-final slot the aimbot uses — so the game cannot override
--- it regardless of BindToRenderStep priority or RenderStepped ordering.
--- ar_strength: 1.0 = pitch frozen (perfect), 0.5 = half correction.
-
-conn(UIS.InputBegan:Connect(function(i, gpe)
-    if gpe or i.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-    if cfg.misc.anti_recoil and not lockedKey then
-        local rx, _, _ = cam.CFrame:ToEulerAnglesYXZ()
-        arLockedPitch = rx
-    end
-end))
-
-conn(UIS.InputEnded:Connect(function(i)
-    if i.UserInputType == Enum.UserInputType.MouseButton1 then
-        arLockedPitch = nil
-    end
-end))
+-- Pitch enforcement merged into the absolute-final RenderStepped post-pass.
+-- No InputBegan needed — we poll IsMouseButtonPressed directly so gpe=true
+-- (game-processed clicks) can never block the capture. First frame LMB is
+-- held: snapshot pitch. Every subsequent frame: enforce it. LMB up: release.
+-- ar_strength: 1.0 = crosshair frozen, 0.5 = half-corrected.
 
 conn(RunService.RenderStepped:Connect(function()
     if fps_aimPos then
@@ -1680,21 +1666,27 @@ conn(RunService.RenderStepped:Connect(function()
         cam.CFrame = cam.CFrame:Lerp(cf, fps_alpha or 1)
         fps_aimPos = nil  -- consume — next frame must be re-set by BindToRenderStep
     end
-    -- anti-recoil enforcement: runs in this same FIFO-last slot so nothing
-    -- can override it after us.  skipped whenever the aimbot has an active
-    -- lock (fps_aimPos already owns the camera for this frame).
-    if cfg.misc.anti_recoil and arLockedPitch and not lockedKey
-       and UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-        local rx, ry, _ = cam.CFrame:ToEulerAnglesYXZ()
-        local target = arLockedPitch + (rx - arLockedPitch) * (1 - cfg.misc.ar_strength)
-        if math.abs(rx - target) > 0.0001 then
-            cam.CFrame = CFrame.new(cam.CFrame.Position) * CFrame.fromEulerAnglesYXZ(target, ry, 0)
-            -- nudge the game's mouse accumulator so next-frame recoil can't re-accumulate
-            local corrDeg = math.deg(rx - target)
-            if corrDeg > 0.001 then
-                pcall(mousemoverel, 0, corrDeg * 2)
+    -- anti-recoil: enforce locked pitch in the same FIFO-last slot.
+    -- skip when aimbot has an active lock — fps_aimPos already owns the camera.
+    if cfg.misc.anti_recoil and not lockedKey then
+        if UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+            local rx, ry, _ = cam.CFrame:ToEulerAnglesYXZ()
+            if not arLockedPitch then
+                arLockedPitch = rx  -- first frame LMB held: snapshot pitch
+            else
+                local target = arLockedPitch + (rx - arLockedPitch) * (1 - cfg.misc.ar_strength)
+                if math.abs(rx - target) > 0.0001 then
+                    cam.CFrame = CFrame.new(cam.CFrame.Position) * CFrame.fromEulerAnglesYXZ(target, ry, 0)
+                    -- also nudge the game's mouse accumulator to prevent re-accumulation
+                    local corrDeg = math.deg(rx - target)
+                    if corrDeg > 0.001 then pcall(mousemoverel, 0, corrDeg * 2) end
+                end
             end
+        else
+            arLockedPitch = nil  -- LMB released: free the pitch lock
         end
+    else
+        arLockedPitch = nil  -- anti-recoil off or aimbot active: stay clear
     end
 end))
 
