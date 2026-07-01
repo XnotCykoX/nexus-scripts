@@ -621,8 +621,9 @@ conn(Players.PlayerRemoving:Connect(function(p) teamSigCache[p] = nil end))
 
 local lockedKey    = nil
 local lockedPart   = nil  -- the part name currently being aimed at (updated per-frame)
-local arPrevRx      = nil  -- camera pitch (rx) at end of previous frame
-local arSensitivity = nil  -- learned: radians of pitch per mouse-pixel (Y axis)
+local arPrevRx  = nil  -- camera pitch (rx) at end of previous frame
+local arPrevRy  = nil  -- camera yaw  (ry) at end of previous frame
+local arSens    = nil  -- learned sensitivity: radians per pixel (horizontal yaw, clean of recoil)
 local tsFlickStart = nil  -- tick() when trickshot flick began
 local tsFlickLook  = nil  -- cam LookVector at the moment flick was initiated
 local prevAimDown  = false
@@ -1671,46 +1672,46 @@ conn(RunService.RenderStepped:Connect(function()
         fps_aimPos = nil  -- consume — next frame must be re-set by BindToRenderStep
     end
 
-    -- anti-recoil: measure and cancel only the recoil portion of vertical drift.
+    -- anti-recoil: isolate and cancel only the game-imposed upward drift.
+    -- sensitivity is learned from HORIZONTAL yaw movement — yaw is never touched
+    -- by vertical recoil, so dx→dRy gives a perfectly clean sens estimate whether
+    -- firing or not.  we never apply correction until sens is actually measured,
+    -- so there is zero risk of fighting the player's own vertical aim.
     if cfg.misc.anti_recoil and not lockedKey then
         local rx, ry, _ = cam.CFrame:ToEulerAnglesYXZ()
-        local dy         = UIS:GetMouseDelta().Y          -- player mouse Y this frame
-        local firing     = UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+        local delta      = UIS:GetMouseDelta()
+        local dx, dy     = delta.X, delta.Y
 
-        if arPrevRx then
-            local dpitch = rx - arPrevRx                  -- total vertical change this frame
-
-            if not firing and math.abs(dy) > 1.0 then
-                -- pure player input (no recoil) → measure sensitivity
-                -- sign: mouse down (dy>0) → camera down → rx increases → same sign
-                local meas = dpitch / dy
-                if meas > 0 then
-                    arSensitivity = arSensitivity
-                        and (arSensitivity * 0.97 + meas * 0.03)
-                        or   meas
-                end
+        -- learn from horizontal panning (works even while firing — no recoil on yaw)
+        if arPrevRy and math.abs(dx) > 2.0 then
+            local dRy = ry - arPrevRy
+            local m   = math.abs(dRy / dx)
+            if m > 0.0001 and m < 0.05 then          -- sanity clamp
+                arSens = arSens and (arSens * 0.9 + m * 0.1) or m
             end
-
-            if firing then
-                local sens     = arSensitivity or 0.005   -- fallback until learned
-                local intended = dy * sens                 -- player's vertical intent
-                local recoil   = dpitch - intended         -- negative = drifted upward
-                -- only correct upward recoil (negative residual); ignore downward noise
-                if recoil < -0.0002 then
-                    local corrRx = rx - recoil * cfg.misc.ar_strength
-                    cam.CFrame   = CFrame.new(cam.CFrame.Position) * CFrame.fromEulerAnglesYXZ(corrRx, ry, 0)
-                    arPrevRx     = corrRx
-                else
-                    arPrevRx = rx
-                end
-            else
-                arPrevRx = rx
-            end
-        else
-            arPrevRx = rx   -- first frame: initialise baseline
         end
+
+        -- apply correction only during firing and only once sensitivity is known
+        if arPrevRx and arSens
+           and UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+            local dpitch   = rx - arPrevRx            -- total vertical change this frame
+            local intended = dy * arSens               -- player's intentional pitch (dy>0 = look down)
+            local recoil   = dpitch - intended         -- negative = unwanted upward drift
+            if recoil < -0.0002 then
+                local corrRx = rx - recoil * cfg.misc.ar_strength
+                cam.CFrame   = CFrame.new(cam.CFrame.Position) * CFrame.fromEulerAnglesYXZ(corrRx, ry, 0)
+                arPrevRx = corrRx
+                arPrevRy = ry
+                return
+            end
+        end
+
+        arPrevRx = rx
+        arPrevRy = ry
     else
-        arPrevRx     = nil  -- reset when off or aimbot active
+        arPrevRx = nil
+        arPrevRy = nil
+        -- intentionally keep arSens — survives toggle off/on within the same session
     end
 end))
 
