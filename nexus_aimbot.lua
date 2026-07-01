@@ -1380,9 +1380,7 @@ local function getLockedPos()
     if not (char and root) then return nil end
     local part, selectedName
     if IS_FL then
-        -- TPVBodyVanillaHead position is live — it moves with the model during
-        -- slides and crouches automatically, no extra state tracking needed.
-        part = flHead(char) or root
+        part = root  -- HumanoidRootPart sits at centre-mass in FL soldier_models
     elseif typeof(lockedKey) == "Instance" and lockedKey:IsA("Model") then
         part = head or root
     else
