@@ -1284,9 +1284,7 @@ local function findBestTarget()
                 local their = getFLTeam(obj)
                 if their and their == myTeam then continue end
             end
-            -- FL: use pickFLAimPart for FOV check so sliding/crouching targets
-            -- are found via the same highest-on-screen part logic as tracking.
-            local head = IS_FL and pickFLAimPart(obj, root) or obj:FindFirstChild("Head")
+            local head = IS_FL and flHead(obj) or obj:FindFirstChild("Head")
             tryKey(obj, obj, root, hum, head, IS_FL)
         end
     end
@@ -1371,48 +1369,30 @@ local function pickSmartPart(key, char, root)
 end
 
 local function getLockedPos()
-    local char, root, hum
+    local char, root, hum, head
     if IS_FL and typeof(lockedKey) == "Instance" and lockedKey:IsA("Player") then
-        -- FL player key (edge case — resolve the workspace character)
         char = getFLChar(lockedKey)
         root = char and char:FindFirstChild("HumanoidRootPart")
         hum  = char and char:FindFirstChildOfClass("Humanoid")
-    elseif IS_FL then
-        -- FL model key (the normal case — lockedKey IS the soldier_model).
-        -- getCharData returns head = FindFirstChild("Head") which is nil on
-        -- soldier_models; they use TPVBodyVanillaHead. calling it for head
-        -- here caused part = head or root to silently collapse to root
-        -- (HumanoidRootPart, waist level, inside the mesh) — fixed below.
-        char, root, hum = getCharData(lockedKey)
     else
-        local head
         char, root, hum, head = getCharData(lockedKey)
-        if not (char and root) then return nil end
-        local part, selectedName
-        if typeof(lockedKey) == "Instance" and lockedKey:IsA("Model") then
-            part = head or root
-        else
-            part, selectedName = pickSmartPart(lockedKey, char, root)
-            lockedPart = selectedName
-            part = part or root
-        end
-        if not part then return nil end
-        local basePos = cfg.aim.prediction
-            and (predictedPos(lockedKey, root) + (part.Position - root.Position))
-            or part.Position
-        if IS_BP and cfg.bp.drop_comp then
-            local dist = (cam.CFrame.Position - root.Position).Magnitude
-            local tof  = dist / math.max(BP_GUN_VELOCITY, 1)
-            basePos = basePos + Vector3.new(0, 0.5 * workspace.Gravity * tof * tof, 0)
-        end
-        return basePos
     end
-    -- only IS_FL reaches here — non-FL returned early above.
     if not (char and root) then return nil end
-    -- pickFLAimPart scans every FL body part and returns whichever is highest
-    -- on screen. standing → TPVBodyVanillaHead. sliding/prone → torso (head
-    -- near floor, torso now highest). wall peek → whatever clears cover first.
-    local part = pickFLAimPart(char, root)
+    local part, selectedName
+    if IS_FL then
+        -- pickFLAimPart tries FL_BODY_PARTS in priority order (torso first),
+        -- returning the first part that is on-screen. this is the slide fix:
+        -- when the player slides, torso stays on-screen and is selected;
+        -- when peeking from behind cover, torso is hidden so it falls through
+        -- to head. no extra state tracking needed.
+        part = pickFLAimPart(char, root)
+    elseif typeof(lockedKey) == "Instance" and lockedKey:IsA("Model") then
+        part = head or root
+    else
+        part, selectedName = pickSmartPart(lockedKey, char, root)
+        lockedPart = selectedName
+        part = part or root
+    end
     if not part then return nil end
     local basePos
     if cfg.aim.prediction then
@@ -1421,6 +1401,11 @@ local function getLockedPos()
         basePos = rootPred + partOffset
     else
         basePos = part.Position
+    end
+    if IS_BP and cfg.bp.drop_comp then
+        local dist = (cam.CFrame.Position - root.Position).Magnitude
+        local tof  = dist / math.max(BP_GUN_VELOCITY, 1)
+        basePos = basePos + Vector3.new(0, 0.5 * workspace.Gravity * tof * tof, 0)
     end
     return basePos
 end
