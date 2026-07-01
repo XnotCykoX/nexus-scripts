@@ -82,8 +82,8 @@ local cfg = {
         noclip       = false,  -- disable character collision
         prox_alarm   = false,  -- screen-edge pulse when enemy is close
         prox_dist    = 30,     -- studs threshold for proximity alarm
-        anti_recoil  = false,  -- pitch camera down to counter vertical recoil
-        ar_strength  = 0.35,   -- degrees of correction per frame at 60 fps
+        anti_recoil  = false,  -- measure & cancel vertical recoil drift each frame
+        ar_strength  = 1.0,    -- fraction of drift to cancel: 1.0 = perfect lock, 0.5 = half
     },
     minimap = {
         enabled  = false,
@@ -621,6 +621,7 @@ conn(Players.PlayerRemoving:Connect(function(p) teamSigCache[p] = nil end))
 
 local lockedKey    = nil
 local lockedPart   = nil  -- the part name currently being aimed at (updated per-frame)
+local arPrevLookY  = nil  -- LookVector.Y snapshot taken before the game's camera update
 local tsFlickStart = nil  -- tick() when trickshot flick began
 local tsFlickLook  = nil  -- cam LookVector at the moment flick was initiated
 local prevAimDown  = false
@@ -1661,27 +1662,39 @@ conn(RunService.RenderStepped:Connect(function()
 end))
 
 -- // ════════════ ANTI-RECOIL ════════════════════════ //
--- Pitches the camera downward each frame while LMB is held to counteract
--- vertical recoil. Fully independent of the aimbot — works with it off.
--- When the aimbot has an active lock (lockedKey ~= nil) it already owns
--- the camera, so anti-recoil yields to avoid fighting it.
+-- Two-step approach: capture the camera's look direction BEFORE the game's
+-- camera script runs, then measure exactly how much it drifted upward AFTER,
+-- and apply the precise inverse.  No fixed strength value needed — the
+-- correction is derived from reality each frame, so it's always exact.
 --
--- ar_strength = degrees of downward correction per frame at 60 fps.
--- Tune upward for heavy recoil guns, downward for small-recoil weapons.
--- Runs at BindToRenderStep priority 999998 — one below the aimbot (999999)
--- so the aimbot always wins the final CFrame write when both are active.
+-- ar_strength = fraction of drift to cancel (0 = off, 1 = perfect/100%).
+-- Default 1.0 keeps the crosshair perfectly locked during firing.
+-- Reduce toward 0.5 if you want partial correction to look more natural.
+--
+-- Step 1 (priority 1 — runs before game camera scripts):
+--   snapshot cam.CFrame.LookVector.Y
+-- Step 2 (priority 999998 — runs after game camera scripts, before aimbot):
+--   measure upward drift, apply exact inverse scaled by ar_strength.
+-- If aimbot has a lock it owns the camera at 999999; anti-recoil yields.
 
-RunService:BindToRenderStep("NexusAntiRecoil", 999998, function(dt)
+RunService:BindToRenderStep("NexusARCapture", 1, function()
+    arPrevLookY = nil
     if not cfg.misc.anti_recoil then return end
     if not UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then return end
-    -- yield to aimbot lock — it controls the camera and anti-recoil would fight it
     if lockedKey then return end
-    local deg = cfg.misc.ar_strength * dt * 60   -- framerate-independent correction
-    -- direct CFrame pitch
-    cam.CFrame = cam.CFrame * CFrame.Angles(math.rad(-deg), 0, 0)
-    -- nudge the game's internal accumulated look-angle for FPS mouse-lock games
+    arPrevLookY = cam.CFrame.LookVector.Y
+end)
+
+RunService:BindToRenderStep("NexusAntiRecoil", 999998, function()
+    if not arPrevLookY then return end
+    -- positive drift = camera pitched UP (recoil); negative = player aimed down (let it go)
+    local drift = cam.CFrame.LookVector.Y - arPrevLookY
+    if drift <= 0.00005 then return end
+    local correction = math.asin(math.clamp(drift * cfg.misc.ar_strength, -1, 1))
+    cam.CFrame = cam.CFrame * CFrame.Angles(-correction, 0, 0)
+    -- also pull the game's accumulated mouse-look down for FPS lock-cursor games
     if UIS.MouseBehavior == Enum.MouseBehavior.LockCenter then
-        pcall(mousemoverel, 0, deg * 2.5)
+        pcall(mousemoverel, 0, math.deg(correction) * 2.5)
     end
 end)
 
@@ -2442,7 +2455,7 @@ mkTog(mP,"Bhop",          cfg.misc,"bhop",         14,"auto-rejump on landing wh
 mkTog(mP,"Noclip",        cfg.misc,"noclip",       15,"disables character collision · toggle off to restore")
 mkSec(mP,"ANTI-RECOIL",16)
 mkTog(mP,"Anti-Recoil",  cfg.misc,"anti_recoil",   17,"pitches camera down to counter vertical recoil · yields to aimbot when locked")
-mkSld(mP,"AR Strength",  cfg.misc,"ar_strength",   0.05,1.5,18,"degrees of correction per frame · raise for heavy recoil guns")
+mkSld(mP,"AR Strength",  cfg.misc,"ar_strength",   0,1,18,"1.0 = perfect lock · 0.5 = half correction · lower = less aggressive")
 mkSec(mP,"ALARM",19)
 mkTog(mP,"Proximity Alarm",cfg.misc,"prox_alarm",  20,"pulsing red border when enemy is close")
 mkSld(mP,"Alarm Distance", cfg.misc,"prox_dist",   5,200,21,"studs · triggers alarm at this range")
