@@ -621,7 +621,7 @@ conn(Players.PlayerRemoving:Connect(function(p) teamSigCache[p] = nil end))
 
 local lockedKey    = nil
 local lockedPart   = nil  -- the part name currently being aimed at (updated per-frame)
-local arPrevLookY  = nil  -- LookVector.Y snapshot taken before the game's camera update
+local arLockedPitch = nil  -- pitch (rx) captured at the moment LMB is first pressed
 local tsFlickStart = nil  -- tick() when trickshot flick began
 local tsFlickLook  = nil  -- cam LookVector at the moment flick was initiated
 local prevAimDown  = false
@@ -1662,39 +1662,48 @@ conn(RunService.RenderStepped:Connect(function()
 end))
 
 -- // ════════════ ANTI-RECOIL ════════════════════════ //
--- Two-step approach: capture the camera's look direction BEFORE the game's
--- camera script runs, then measure exactly how much it drifted upward AFTER,
--- and apply the precise inverse.  No fixed strength value needed — the
--- correction is derived from reality each frame, so it's always exact.
+-- Pitch enforcement approach: snap the camera's vertical angle at the moment
+-- LMB is pressed, then enforce that exact pitch every frame after the game's
+-- own camera script has run (priority 200).  No drift measurement needed —
+-- we just overwrite whatever the game did to the camera's Y axis.
 --
--- ar_strength = fraction of drift to cancel (0 = off, 1 = perfect/100%).
--- Default 1.0 keeps the crosshair perfectly locked during firing.
--- Reduce toward 0.5 if you want partial correction to look more natural.
+-- Why not measure-and-correct: RenderStepped fires BEFORE BindToRenderStep,
+-- so if the game applies recoil in RenderStepped a capture-then-correct loop
+-- always sees zero drift and does nothing.  Enforcement sidesteps this entirely.
 --
--- Step 1 (priority 1 — runs before game camera scripts):
---   snapshot cam.CFrame.LookVector.Y
--- Step 2 (priority 999998 — runs after game camera scripts, before aimbot):
---   measure upward drift, apply exact inverse scaled by ar_strength.
--- If aimbot has a lock it owns the camera at 999999; anti-recoil yields.
+-- ar_strength: 1.0 = crosshair frozen (perfect), 0.5 = half-corrected.
+-- Fires at priority 999998 — after game camera (200), before aimbot (999999).
+-- If aimbot has a lock it owns the camera; anti-recoil returns immediately.
 
-RunService:BindToRenderStep("NexusARCapture", 1, function()
-    arPrevLookY = nil
-    if not cfg.misc.anti_recoil then return end
-    if not UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then return end
-    if lockedKey then return end
-    arPrevLookY = cam.CFrame.LookVector.Y
-end)
+conn(UIS.InputBegan:Connect(function(i, gpe)
+    if gpe or i.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+    if cfg.misc.anti_recoil and not lockedKey then
+        local rx, _, _ = cam.CFrame:ToEulerAnglesYXZ()
+        arLockedPitch = rx
+    end
+end))
+
+conn(UIS.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 then
+        arLockedPitch = nil
+    end
+end))
 
 RunService:BindToRenderStep("NexusAntiRecoil", 999998, function()
-    if not arPrevLookY then return end
-    -- positive drift = camera pitched UP (recoil); negative = player aimed down (let it go)
-    local drift = cam.CFrame.LookVector.Y - arPrevLookY
-    if drift <= 0.00005 then return end
-    local correction = math.asin(math.clamp(drift * cfg.misc.ar_strength, -1, 1))
-    cam.CFrame = cam.CFrame * CFrame.Angles(-correction, 0, 0)
-    -- also pull the game's accumulated mouse-look down for FPS lock-cursor games
-    if UIS.MouseBehavior == Enum.MouseBehavior.LockCenter then
-        pcall(mousemoverel, 0, math.deg(correction) * 2.5)
+    if not cfg.misc.anti_recoil then arLockedPitch = nil; return end
+    if lockedKey                 then arLockedPitch = nil; return end
+    if not arLockedPitch         then return end
+    if not UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+        arLockedPitch = nil; return
+    end
+    local rx, ry, _ = cam.CFrame:ToEulerAnglesYXZ()
+    -- ar_strength 1.0 = fully locked pitch; 0 = no correction
+    local target = arLockedPitch + (rx - arLockedPitch) * (1 - cfg.misc.ar_strength)
+    cam.CFrame   = CFrame.new(cam.CFrame.Position) * CFrame.fromEulerAnglesYXZ(target, ry, 0)
+    -- nudge the game's internal mouse-look accumulator so recoil doesn't re-apply next frame
+    local corrDeg = math.deg(rx - target)
+    if corrDeg > 0.001 and UIS.MouseBehavior == Enum.MouseBehavior.LockCenter then
+        pcall(mousemoverel, 0, corrDeg * 2)
     end
 end)
 
