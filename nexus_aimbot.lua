@@ -486,9 +486,92 @@ local function collectSignals(plr, char)
         end
     end
 
-    -- NOTE: workspace folder grouping intentionally omitted for players.
-    -- Games often put ALL characters in one shared folder (e.g. workspace.Players),
-    -- which would make every player appear as a teammate.
+    -- 8. Character dominant part-colour fingerprint
+    -- Scan solid BaseParts and average their hue. Paintball / team games paint
+    -- entire characters in team colours, so the average hue is a very reliable
+    -- per-team signal — two Red players will both produce "red"; two Blue players
+    -- will both produce "blue". Only counts parts with meaningful saturation so
+    -- grey/white/black (weapons, default skin tone) don't pollute the average.
+    if char then
+        local sumH, n = 0, 0
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") and part.Transparency < 0.5 then
+                local h, sv, v = Color3.toHSV(part.Color)
+                if sv > 0.25 and v > 0.25 then
+                    sumH = sumH + h; n = n + 1
+                end
+            end
+        end
+        if n >= 3 then
+            local avgH = sumH / n
+            local hue
+            if     avgH < 0.042 or avgH >= 0.958 then hue = "red"
+            elseif avgH < 0.125 then hue = "orange"
+            elseif avgH < 0.208 then hue = "yellow"
+            elseif avgH < 0.458 then hue = "green"
+            elseif avgH < 0.625 then hue = "cyan"
+            elseif avgH < 0.792 then hue = "blue"
+            elseif avgH < 0.875 then hue = "purple"
+            else                     hue = "magenta" end
+            addSig(s, "partcolor", hue)
+        end
+    end
+
+    -- 9. Workspace ancestor folder name
+    -- Some games place characters in team-named Folders one level up from
+    -- workspace, e.g. workspace.RedTeam.Character or workspace.Blue.Char.
+    -- Shared catch-all folders ("Players", "Characters", "NPCs") are skipped
+    -- so they don't make every character look like a teammate.
+    if char then
+        local par = char.Parent
+        if par and par ~= workspace and par ~= game and par:IsA("Folder") then
+            local pn = par.Name:lower():gsub("%s+", "")
+            local skip = { players=true, characters=true, npcs=true,
+                           models=true, entities=true, units=true }
+            if pn ~= "" and not skip[pn] then
+                addSig(s, "wsfolder", pn)
+            end
+        end
+    end
+
+    -- 10. Overhead BillboardGui on Head
+    -- Many games attach a nametag BillboardGui to the character's Head.
+    -- The TextLabel inside often contains the team name, or its BackgroundColor3
+    -- / TextColor3 is set to the team colour. Both text content and hue-bucketed
+    -- colours are extracted so sigMatch can fire on either signal.
+    if char then
+        local head = char:FindFirstChild("Head")
+        if head then
+            local function hueKey(c3)
+                local h, sv = Color3.toHSV(c3)
+                if sv < 0.25 then return nil end   -- skip near-grey
+                if     h < 0.042 or h >= 0.958 then return "red"
+                elseif h < 0.208 then return "warm"
+                elseif h < 0.458 then return "green"
+                elseif h < 0.625 then return "cyan"
+                elseif h < 0.792 then return "blue"
+                else                   return "purple" end
+            end
+            for _, gui in ipairs(head:GetChildren()) do
+                if gui:IsA("BillboardGui") then
+                    for _, elem in ipairs(gui:GetDescendants()) do
+                        if elem:IsA("TextLabel") or elem:IsA("TextButton") then
+                            local txt = elem.Text:lower():match("^%s*(.-)%s*$")
+                            if txt ~= "" and #txt < 40 then
+                                addSig(s, "nametag", txt)
+                            end
+                            if elem.BackgroundTransparency < 0.7 then
+                                local k = hueKey(elem.BackgroundColor3)
+                                if k then addSig(s, "nametag_bg", k) end
+                            end
+                            local k = hueKey(elem.TextColor3)
+                            if k then addSig(s, "nametag_txt", k) end
+                        end
+                    end
+                end
+            end
+        end
+    end
 
     return s
 end
