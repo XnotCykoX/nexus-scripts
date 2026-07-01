@@ -621,9 +621,8 @@ conn(Players.PlayerRemoving:Connect(function(p) teamSigCache[p] = nil end))
 
 local lockedKey    = nil
 local lockedPart   = nil  -- the part name currently being aimed at (updated per-frame)
-local arPrevRx  = nil  -- camera pitch (rx) at end of previous frame
-local arPrevRy  = nil  -- camera yaw  (ry) at end of previous frame
-local arSens    = nil  -- learned sensitivity: radians per pixel (horizontal yaw, clean of recoil)
+local arPrevLookY  = nil  -- LookVector.Y from the previous frame (no euler angle ambiguity)
+local arLookYSens  = nil  -- dLookY/dy: change in LookVector.Y per mouse pixel (signed, auto-learned)
 local tsFlickStart = nil  -- tick() when trickshot flick began
 local tsFlickLook  = nil  -- cam LookVector at the moment flick was initiated
 local prevAimDown  = false
@@ -1672,49 +1671,47 @@ conn(RunService.RenderStepped:Connect(function()
         fps_aimPos = nil  -- consume — next frame must be re-set by BindToRenderStep
     end
 
-    -- anti-recoil: isolate and cancel only the game-imposed upward drift.
-    -- sensitivity is learned from HORIZONTAL yaw movement — yaw is never touched
-    -- by vertical recoil, so dx→dRy gives a perfectly clean sens estimate whether
-    -- firing or not.  we never apply correction until sens is actually measured,
-    -- so there is zero risk of fighting the player's own vertical aim.
+    -- anti-recoil: LookVector.Y approach — no euler angles, no sign guessing.
+    -- LookVector.Y is unambiguous: positive = looking up, increases with recoil.
+    -- arLookYSens = dLookY/dy (negative in roblox: mouse down → LookVector.Y drops).
+    -- learned from non-firing vertical mouse movement so sign is always correct.
+    -- no fallback — correction is skipped until at least one measurement is taken.
     if cfg.misc.anti_recoil and not lockedKey then
-        local rx, ry, _ = cam.CFrame:ToEulerAnglesYXZ()
-        local delta      = UIS:GetMouseDelta()
-        local dx, dy     = delta.X, delta.Y
+        local lookY  = cam.CFrame.LookVector.Y
+        local dy     = UIS:GetMouseDelta().Y
+        local firing = UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
 
-        -- learn from horizontal panning (works even while firing — no recoil on yaw)
-        if arPrevRy and math.abs(dx) > 2.0 then
-            local dRy = ry - arPrevRy
-            local m   = math.abs(dRy / dx)
-            if m > 0.0001 and m < 0.05 then          -- sanity clamp
-                arSens = arSens and (arSens * 0.9 + m * 0.1) or m
+        if arPrevLookY ~= nil then
+            local dLookY = lookY - arPrevLookY   -- positive = camera moved up this frame
+
+            -- learn sensitivity from non-firing vertical mouse movement (sign-correct)
+            if not firing and math.abs(dy) > 0.5 then
+                local m = dLookY / dy             -- negative in standard roblox
+                if math.abs(m) > 0.000001 and math.abs(m) < 0.1 then
+                    arLookYSens = arLookYSens
+                        and (arLookYSens * 0.92 + m * 0.08)
+                        or   m
+                end
+            end
+
+            -- cancel recoil during firing (only once sens is measured)
+            if firing and arLookYSens then
+                local intended = dy * arLookYSens  -- expected dLookY from player input
+                local recoil   = dLookY - intended -- positive = camera drifted UP beyond intent
+                if recoil > 0.0005 then
+                    -- cam * CFrame.Angles(negative_x, 0, 0) pitches camera DOWN in local space
+                    local corrAngle = math.asin(math.clamp(recoil * cfg.misc.ar_strength, -1, 1))
+                    cam.CFrame  = cam.CFrame * CFrame.Angles(-corrAngle, 0, 0)
+                    arPrevLookY = cam.CFrame.LookVector.Y   -- track corrected value
+                    return
+                end
             end
         end
 
-        -- apply correction only during firing and only once sensitivity is known
-        if arPrevRx and arSens
-           and UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-            local dpitch   = rx - arPrevRx            -- total vertical change this frame
-            -- in roblox: positive rx = looking UP, so mouse-down (dy>0) → rx decreases.
-            -- intended must carry the opposite sign to dy: -dy*sens gives the correct
-            -- expected dpitch direction. recoil = upward drift = positive residual.
-            local intended = -dy * arSens              -- player's intended pitch change
-            local recoil   = dpitch - intended         -- positive = unwanted upward drift
-            if recoil > 0.0002 then
-                local corrRx = rx - recoil * cfg.misc.ar_strength
-                cam.CFrame   = CFrame.new(cam.CFrame.Position) * CFrame.fromEulerAnglesYXZ(corrRx, ry, 0)
-                arPrevRx = corrRx
-                arPrevRy = ry
-                return
-            end
-        end
-
-        arPrevRx = rx
-        arPrevRy = ry
+        arPrevLookY = lookY
     else
-        arPrevRx = nil
-        arPrevRy = nil
-        -- intentionally keep arSens — survives toggle off/on within the same session
+        arPrevLookY = nil
+        -- arLookYSens intentionally kept — survives toggle within same session
     end
 end))
 
