@@ -293,6 +293,41 @@ local function flHead(char)
     return char:FindFirstChild("TPVBodyVanillaHead") or char:FindFirstChild("Head")
 end
 
+-- ordered list of FL body parts to try as aim targets.
+-- priority: head first, then torso, then arms, then root as last resort.
+local FL_BODY_PARTS = {
+    "TPVBodyVanillaHead",
+    "TPVBodyVanillaTorsoFront",
+    "TPVBodyVanillaTorsoBack",
+    "TPVBodyVanillaArmL",
+    "TPVBodyVanillaArmR",
+    "HumanoidRootPart",
+}
+
+-- picks the highest on-screen FL body part, naturally adapting to pose:
+--   standing  → TPVBodyVanillaHead (highest on screen)
+--   crouching → TPVBodyVanillaHead (still highest, just lower on screen)
+--   sliding   → TPVBodyVanillaTorsoFront (head near floor, torso is now highest)
+--   wall peek → whichever part clears the cover first
+-- "highest on screen" = lowest screen-space Y value.
+-- this replaces the old `flHead(char) or root` fallback which silently
+-- resolved to HumanoidRootPart when TPVBodyVanillaHead was missing,
+-- causing the aimbot to aim at waist-level inside the body mesh.
+local function pickFLAimPart(char, root)
+    local bestPart, bestScrY = root, math.huge
+    for _, pName in ipairs(FL_BODY_PARTS) do
+        local p = char:FindFirstChild(pName)
+        if p then
+            local sp, onScreen = cam:WorldToViewportPoint(p.Position)
+            if onScreen and sp.Y < bestScrY then
+                bestScrY = sp.Y
+                bestPart = p
+            end
+        end
+    end
+    return bestPart
+end
+
 -- // ══════════ FRONTLINES HELPERS ════════════════════ //
 
 getLocalFLModel = function()
@@ -1245,7 +1280,9 @@ local function findBestTarget()
                 local their = getFLTeam(obj)
                 if their and their == myTeam then continue end
             end
-            local head = IS_FL and flHead(obj) or obj:FindFirstChild("Head")
+            -- FL: use pickFLAimPart for FOV check so sliding/crouching targets
+            -- are found via the same highest-on-screen part logic as tracking.
+            local head = IS_FL and pickFLAimPart(obj, root) or obj:FindFirstChild("Head")
             tryKey(obj, obj, root, hum, head, IS_FL)
         end
     end
@@ -1330,52 +1367,56 @@ local function pickSmartPart(key, char, root)
 end
 
 local function getLockedPos()
-    local char, root, hum, head
+    local char, root, hum
     if IS_FL and typeof(lockedKey) == "Instance" and lockedKey:IsA("Player") then
-        -- FL: resolve workspace character (real position), not StarterCharacter
+        -- FL player key (edge case — resolve the workspace character)
         char = getFLChar(lockedKey)
         root = char and char:FindFirstChild("HumanoidRootPart")
         hum  = char and char:FindFirstChildOfClass("Humanoid")
-        head = char and flHead(char)
+    elseif IS_FL then
+        -- FL model key (the normal case — lockedKey IS the soldier_model).
+        -- getCharData returns head = FindFirstChild("Head") which is nil on
+        -- soldier_models; they use TPVBodyVanillaHead. calling it for head
+        -- here caused part = head or root to silently collapse to root
+        -- (HumanoidRootPart, waist level, inside the mesh) — fixed below.
+        char, root, hum = getCharData(lockedKey)
     else
+        local head
         char, root, hum, head = getCharData(lockedKey)
+        if not (char and root) then return nil end
+        local part, selectedName
+        if typeof(lockedKey) == "Instance" and lockedKey:IsA("Model") then
+            part = head or root
+        else
+            part, selectedName = pickSmartPart(lockedKey, char, root)
+            lockedPart = selectedName
+            part = part or root
+        end
+        if not part then return nil end
+        local basePos = cfg.aim.prediction
+            and (predictedPos(lockedKey, root) + (part.Position - root.Position))
+            or part.Position
+        if IS_BP and cfg.bp.drop_comp then
+            local dist = (cam.CFrame.Position - root.Position).Magnitude
+            local tof  = dist / math.max(BP_GUN_VELOCITY, 1)
+            basePos = basePos + Vector3.new(0, 0.5 * workspace.Gravity * tof * tof, 0)
+        end
+        return basePos
     end
+    -- only IS_FL reaches here — non-FL returned early above.
     if not (char and root) then return nil end
-    local part, selectedName
-    if IS_FL then
-        -- FL: aim at TPVBodyVanillaHead, fall back to root
-        part = head or root
-    elseif typeof(lockedKey) == "Instance" and lockedKey:IsA("Model") then
-        -- NPC model — head or root, no smart picking needed
-        part = head or root
-    else
-        -- visibility-aware dynamic part selection
-        part, selectedName = pickSmartPart(lockedKey, char, root)
-        lockedPart = selectedName  -- keep in sync for Phase 0 next frame
-        part = part or root
-    end
+    -- pickFLAimPart scans every FL body part and returns whichever is highest
+    -- on screen. standing → TPVBodyVanillaHead. sliding/prone → torso (head
+    -- near floor, torso now highest). wall peek → whatever clears cover first.
+    local part = pickFLAimPart(char, root)
     if not part then return nil end
     local basePos
     if cfg.aim.prediction then
-        -- predict root (velocity lives on HRP), then re-add the part→root
-        -- offset so we land on the predicted PART position, not root level.
         local rootPred   = predictedPos(lockedKey, root)
         local partOffset = part.Position - root.Position
         basePos = rootPred + partOffset
     else
         basePos = part.Position
-    end
-    -- bullet drop compensation for Big Paintball.
-    -- paintball bullets fly at ~235 studs/s (or patched value) and arc down
-    -- under workspace.Gravity. to land on the target we must aim above by the
-    -- amount the bullet will have fallen by the time it arrives.
-    -- formula: drop = 0.5 * g * tof²   where tof = dist / velocity
-    if IS_BP and cfg.bp.drop_comp then
-        local dist    = (cam.CFrame.Position - root.Position).Magnitude
-        local vel     = math.max(BP_GUN_VELOCITY, 1)
-        local tof     = dist / vel
-        local drop    = 0.5 * workspace.Gravity * tof * tof
-        basePos = basePos + Vector3.new(0, drop, 0)
     end
     return basePos
 end
