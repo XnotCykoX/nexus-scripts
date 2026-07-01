@@ -302,36 +302,6 @@ local function flHead(char)
     return char:FindFirstChild("TPVBodyVanillaHead") or char:FindFirstChild("Head")
 end
 
--- ordered list of FL body parts to try as aim targets.
--- torso-first: large hit region, reliable centre-mass contact.
--- head listed second so wall peeks (torso hidden) fall through to head.
-local FL_BODY_PARTS = {
-    "TPVBodyVanillaTorsoFront",
-    "TPVBodyVanillaHead",
-    "TPVBodyVanillaTorsoBack",
-    "TPVBodyVanillaArmL",
-    "TPVBodyVanillaArmR",
-    "HumanoidRootPart",
-}
-
--- returns the first FL body part that is on-screen, in FL_BODY_PARTS order.
--- order-based priority means:
---   standing / crouching / sliding → TorsoFront (always on screen, centre mass)
---   wall peek (torso behind cover)  → Head (falls through to first visible part)
---   last resort                     → HumanoidRootPart
--- previously used "lowest screen Y" (highest part) which always picked the
--- head, causing the aimbot to aim above where bullets actually register.
-local function pickFLAimPart(char, root)
-    for _, pName in ipairs(FL_BODY_PARTS) do
-        local p = char:FindFirstChild(pName)
-        if p then
-            local _, onScreen = cam:WorldToViewportPoint(p.Position)
-            if onScreen then return p end
-        end
-    end
-    return root
-end
-
 -- // ══════════ FRONTLINES HELPERS ════════════════════ //
 
 getLocalFLModel = function()
