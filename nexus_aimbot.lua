@@ -1380,12 +1380,9 @@ local function getLockedPos()
     if not (char and root) then return nil end
     local part, selectedName
     if IS_FL then
-        -- pickFLAimPart tries FL_BODY_PARTS in priority order (torso first),
-        -- returning the first part that is on-screen. this is the slide fix:
-        -- when the player slides, torso stays on-screen and is selected;
-        -- when peeking from behind cover, torso is hidden so it falls through
-        -- to head. no extra state tracking needed.
-        part = pickFLAimPart(char, root)
+        -- TPVBodyVanillaHead position is live — it moves with the model during
+        -- slides and crouches automatically, no extra state tracking needed.
+        part = flHead(char) or root
     elseif typeof(lockedKey) == "Instance" and lockedKey:IsA("Model") then
         part = head or root
     else
