@@ -1653,14 +1653,25 @@ end)
 -- camera script can override it regardless of what BindToRenderStep priority
 -- they bind at or whether they use RenderStepped:Connect themselves.
 -- // ════════════ ANTI-RECOIL ════════════════════════ //
--- Delta-isolation approach: each frame we subtract the player's intended pitch
--- change (GetMouseDelta().Y × sensitivity) from the total pitch change.
--- What's left is pure recoil — we cancel only that, so vertical aim moves freely.
---
--- Sensitivity is learned passively: any frame the player moves the mouse while
--- NOT firing gives us pitch_change / mouse_delta_Y.  A slow EMA keeps it stable.
--- A conservative fallback (0.005 rad/px) covers the first few frames before
--- enough samples are collected.  ar_strength scales from 0 (off) to 1 (full).
+-- Uses LookVector.Y (unambiguous sign) to measure drift each frame.
+-- arLookYSens = dLookY/dy — calibrated once at startup via a silent 3-pixel
+-- test nudge, then continuously refined from non-firing vertical movement.
+-- During firing: recoil = (actual dLookY) − (dy × sens). Cancel the residual.
+
+-- startup calibration: apply a 3px test nudge, measure camera response, undo.
+-- runs after 1 rendered frame so the camera is fully active. 3px is below the
+-- perceptual threshold at any sensitivity and corrects itself the next frame.
+task.defer(function()
+    RunService.RenderStepped:Wait()
+    local prevY = cam.CFrame.LookVector.Y
+    pcall(mousemoverel, 0, 3)
+    RunService.RenderStepped:Wait()
+    local d = cam.CFrame.LookVector.Y - prevY
+    if math.abs(d) > 1e-7 then
+        arLookYSens = d / 3
+        pcall(mousemoverel, 0, -3)   -- undo
+    end
+end)
 
 conn(RunService.RenderStepped:Connect(function()
     if fps_aimPos then
@@ -1671,11 +1682,7 @@ conn(RunService.RenderStepped:Connect(function()
         fps_aimPos = nil  -- consume — next frame must be re-set by BindToRenderStep
     end
 
-    -- anti-recoil: LookVector.Y approach — no euler angles, no sign guessing.
-    -- LookVector.Y is unambiguous: positive = looking up, increases with recoil.
-    -- arLookYSens = dLookY/dy (negative in roblox: mouse down → LookVector.Y drops).
-    -- learned from non-firing vertical mouse movement so sign is always correct.
-    -- no fallback — correction is skipped until at least one measurement is taken.
+    -- anti-recoil: LookVector.Y — no euler angles, no sign guessing.
     if cfg.misc.anti_recoil and not lockedKey then
         local lookY  = cam.CFrame.LookVector.Y
         local dy     = UIS:GetMouseDelta().Y
@@ -1684,25 +1691,24 @@ conn(RunService.RenderStepped:Connect(function()
         if arPrevLookY ~= nil then
             local dLookY = lookY - arPrevLookY   -- positive = camera moved up this frame
 
-            -- learn sensitivity from non-firing vertical mouse movement (sign-correct)
-            if not firing and math.abs(dy) > 0.5 then
-                local m = dLookY / dy             -- negative in standard roblox
-                if math.abs(m) > 0.000001 and math.abs(m) < 0.1 then
+            -- continuously refine sensitivity from non-firing vertical input
+            if not firing and math.abs(dy) > 0.1 then
+                local m = dLookY / dy
+                if math.abs(m) > 1e-6 and math.abs(m) < 0.1 then
                     arLookYSens = arLookYSens
-                        and (arLookYSens * 0.92 + m * 0.08)
+                        and (arLookYSens * 0.95 + m * 0.05)
                         or   m
                 end
             end
 
-            -- cancel recoil during firing (only once sens is measured)
+            -- cancel upward recoil during firing
             if firing and arLookYSens then
-                local intended = dy * arLookYSens  -- expected dLookY from player input
-                local recoil   = dLookY - intended -- positive = camera drifted UP beyond intent
-                if recoil > 0.0005 then
-                    -- cam * CFrame.Angles(negative_x, 0, 0) pitches camera DOWN in local space
+                local intended = dy * arLookYSens  -- dLookY the player's mouse caused
+                local recoil   = dLookY - intended -- positive = camera drifted up beyond intent
+                if recoil > 0.0002 then
                     local corrAngle = math.asin(math.clamp(recoil * cfg.misc.ar_strength, -1, 1))
                     cam.CFrame  = cam.CFrame * CFrame.Angles(-corrAngle, 0, 0)
-                    arPrevLookY = cam.CFrame.LookVector.Y   -- track corrected value
+                    arPrevLookY = cam.CFrame.LookVector.Y
                     return
                 end
             end
