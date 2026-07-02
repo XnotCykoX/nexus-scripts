@@ -1742,6 +1742,9 @@ conn(RunService.Heartbeat:Connect(function()
     local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
     if not hum then return end
     hum.WalkSpeed = cfg.localplayer.walkspeed
+    -- JumpPower is a no-op unless UseJumpPower is true — some games default
+    -- their rigs to JumpHeight-based jumping, which silently ignores JumpPower.
+    hum.UseJumpPower = true
     hum.JumpPower = cfg.localplayer.jumppower
 end))
 
