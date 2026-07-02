@@ -71,6 +71,11 @@ local cfg = {
         speed       = 30,
         default_spd = 16,
     },
+    localplayer = {
+        enabled   = false,
+        walkspeed = 16,
+        jumppower = 50,
+    },
     misc = {
         fov_circle   = true,
         crosshair    = false,
@@ -1730,6 +1735,16 @@ conn(RunService.Heartbeat:Connect(function()
     hum.WalkSpeed = UIS:IsKeyDown(cfg.sprint.key) and cfg.sprint.speed or cfg.sprint.default_spd
 end))
 
+-- // ═════════════════ LOCAL PLAYER ═══════════════════ //
+
+conn(RunService.Heartbeat:Connect(function()
+    if not cfg.localplayer.enabled then return end
+    local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    hum.WalkSpeed = cfg.localplayer.walkspeed
+    hum.JumpPower = cfg.localplayer.jumppower
+end))
+
 -- // ════════════════ BHOP ════════════════════════════ //
 
 local function connectBhop(char)
@@ -2127,7 +2142,7 @@ local TXA=Color3.fromRGB(225,225,248); local TXB=Color3.fromRGB(95,95,125)
 local TXC=Color3.fromRGB(145,105,255)
 
 local WIN = Instance.new("Frame")
-WIN.Size=UDim2.new(0,440,0,580); WIN.Position=UDim2.new(0.5,-220,0.5,-290)
+WIN.Size=UDim2.new(0,460,0,580); WIN.Position=UDim2.new(0.5,-230,0.5,-290)
 WIN.BackgroundColor3=BG0; WIN.BorderSizePixel=0; WIN.Active=true; WIN.Parent=SG
 Instance.new("UICorner",WIN).CornerRadius=UDim.new(0,10)
 local GS=Instance.new("UIStroke"); GS.Color=Color3.fromRGB(110,65,235); GS.Thickness=1; GS.Transparency=0.5; GS.Parent=WIN
@@ -2399,10 +2414,11 @@ local function mkMultiSelect(p, label, tbl, key, options, ord)
     end
 end
 
-local aP=makeTab("Aimbot","◎",1)
-local eP=makeTab("ESP",   "◈",2)
-local sP=makeTab("Sprint","▶",3)
-local mP=makeTab("Misc",  "⊹",4)
+local aP=makeTab("Aimbot",     "◎",1)
+local eP=makeTab("ESP",        "◈",2)
+local sP=makeTab("Sprint",     "▶",3)
+local lpP=makeTab("LocalPlayer","☺",4)
+local mP=makeTab("Misc",       "⊹",5)
 
 mkSec(aP,"CORE",0)
 mkTog(aP,"Aimbot Enabled",            cfg.aim,"enabled",    1)
@@ -2446,6 +2462,11 @@ mkTog(sP,"Sprint Enabled",            cfg.sprint,"enabled",    1)
 mkBind(sP,"Sprint Key",               cfg.sprint,"key",        2)
 mkSld(sP,"Sprint Speed",              cfg.sprint,"speed",      16,120,3)
 mkSld(sP,"Default Walkspeed",         cfg.sprint,"default_spd",8, 50, 4)
+
+mkSec(lpP,"LOCAL PLAYER",0)
+mkTog(lpP,"Enabled",                  cfg.localplayer,"enabled",  1,"forces WalkSpeed/JumpPower every frame · overrides Sprint while on")
+mkSld(lpP,"Walkspeed",                cfg.localplayer,"walkspeed",8, 500,2)
+mkSld(lpP,"Jumppower",                cfg.localplayer,"jumppower",20,400,3)
 
 mkSec(mP,"TARGETING",0)
 mkTog(mP,"NPC / Bot Mode",cfg.misc,"npc_mode",1,"targets humanoid NPCs · Scoped / bot games",function(on)
@@ -3153,7 +3174,7 @@ do
             end
         end
         local hum = char and char:FindFirstChildOfClass("Humanoid")
-        if hum then hum.WalkSpeed = 16 end
+        if hum then hum.WalkSpeed = 16; hum.JumpPower = 50 end
         SG:Destroy(); print("[NEXUS] unloaded")
     end
     UB.MouseButton1Click:Connect(unload)
