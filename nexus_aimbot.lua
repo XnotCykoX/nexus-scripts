@@ -71,11 +71,6 @@ local cfg = {
         speed       = 30,
         default_spd = 16,
     },
-    localplayer = {
-        enabled   = false,
-        walkspeed = 16,
-        jumppower = 50,
-    },
     misc = {
         fov_circle   = true,
         crosshair    = false,
@@ -1735,19 +1730,6 @@ conn(RunService.Heartbeat:Connect(function()
     hum.WalkSpeed = UIS:IsKeyDown(cfg.sprint.key) and cfg.sprint.speed or cfg.sprint.default_spd
 end))
 
--- // ═════════════════ LOCAL PLAYER ═══════════════════ //
-
-conn(RunService.Heartbeat:Connect(function()
-    if not cfg.localplayer.enabled then return end
-    local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
-    if not hum then return end
-    hum.WalkSpeed = cfg.localplayer.walkspeed
-    -- JumpPower is a no-op unless UseJumpPower is true — some games default
-    -- their rigs to JumpHeight-based jumping, which silently ignores JumpPower.
-    hum.UseJumpPower = true
-    hum.JumpPower = cfg.localplayer.jumppower
-end))
-
 -- // ════════════════ BHOP ════════════════════════════ //
 
 local function connectBhop(char)
@@ -2128,403 +2110,146 @@ conn(UIS.InputBegan:Connect(function(i, gpe)
 end))
 
 -- // ═══════════════════ UI ══════════════════════════ //
+-- The settings menu is now built by the APEX GUI library, fetched from GitHub so this
+-- script stays small. Overlays (minimap, proximity alarm) still live on their own ScreenGui.
 
 local GUI_ROOT = (function()
     local ok, r = pcall(gethui); return ok and r or game:GetService("CoreGui")
 end)()
 
+-- overlay layer: minimap + proximity alarm parent here (NOT the settings window)
 local SG = Instance.new("ScreenGui")
-SG.Name="NexusUI"; SG.ResetOnSpawn=false
-SG.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; SG.Parent=GUI_ROOT
+SG.Name = "NexusUI"; SG.ResetOnSpawn = false
+SG.ZIndexBehavior = Enum.ZIndexBehavior.Sibling; SG.Parent = GUI_ROOT
 
-local BG0=Color3.fromRGB(9,9,13);   local BG1=Color3.fromRGB(14,14,20)
-local BG2=Color3.fromRGB(19,19,27); local BG3=Color3.fromRGB(26,26,38)
-local TABON=Color3.fromRGB(110,65,235); local TABOF=Color3.fromRGB(19,19,27)
-local TGON=Color3.fromRGB(95,55,215);  local TGOFF=Color3.fromRGB(35,35,52)
-local TXA=Color3.fromRGB(225,225,248); local TXB=Color3.fromRGB(95,95,125)
-local TXC=Color3.fromRGB(145,105,255)
+-- forward declaration so the Unload button (built below) can call the real cleanup (defined later)
+local nexusUnload
 
-local WIN = Instance.new("Frame")
-WIN.Size=UDim2.new(0,460,0,580); WIN.Position=UDim2.new(0.5,-230,0.5,-290)
-WIN.BackgroundColor3=BG0; WIN.BorderSizePixel=0; WIN.Active=true; WIN.Parent=SG
-Instance.new("UICorner",WIN).CornerRadius=UDim.new(0,10)
-local GS=Instance.new("UIStroke"); GS.Color=Color3.fromRGB(110,65,235); GS.Thickness=1; GS.Transparency=0.5; GS.Parent=WIN
-local SHD=Instance.new("Frame"); SHD.Size=UDim2.new(1,22,1,22); SHD.Position=UDim2.new(0,-11,0,-11)
-SHD.BackgroundColor3=Color3.new(0,0,0); SHD.BackgroundTransparency=0.5; SHD.BorderSizePixel=0; SHD.ZIndex=WIN.ZIndex-1; SHD.Parent=WIN
-Instance.new("UICorner",SHD).CornerRadius=UDim.new(0,15)
-
-local TB = Instance.new("Frame")
-TB.Size=UDim2.new(1,0,0,46); TB.BackgroundColor3=BG1; TB.BorderSizePixel=0; TB.Parent=WIN
-Instance.new("UICorner",TB).CornerRadius=UDim.new(0,10)
-local TBf=Instance.new("Frame"); TBf.Size=UDim2.new(1,0,0,10); TBf.Position=UDim2.new(0,0,1,-10)
-TBf.BackgroundColor3=BG1; TBf.BorderSizePixel=0; TBf.Parent=TB
-
-local function mkL(p,t,f,s,c,xa,pos,sz)
-    local l=Instance.new("TextLabel"); l.Text=t; l.Font=f; l.TextSize=s; l.TextColor3=c
-    l.BackgroundTransparency=1; l.TextXAlignment=xa or Enum.TextXAlignment.Center
-    l.Position=pos or UDim2.new(0,0,0,0); l.Size=sz or UDim2.new(1,0,1,0); l.Parent=p; return l
-end
-
-mkL(TB,"NEXUS",Enum.Font.GothamBold,16,TXA,Enum.TextXAlignment.Left,UDim2.new(0,14,0,5),UDim2.new(0,80,0,20))
-mkL(TB,IS_FL and "frontlines mode" or "universal",Enum.Font.Gotham,10,IS_FL and Color3.fromRGB(80,200,120) or TXB,
-    Enum.TextXAlignment.Left,UDim2.new(0,15,0,26),UDim2.new(0,140,0,14))
-local adot=Instance.new("Frame"); adot.Size=UDim2.new(0,6,0,6); adot.Position=UDim2.new(0,64,0,11)
-adot.BackgroundColor3=IS_FL and Color3.fromRGB(80,200,120) or TXC; adot.BorderSizePixel=0; adot.Parent=TB
-Instance.new("UICorner",adot).CornerRadius=UDim.new(1,0)
-
-local UB=Instance.new("TextButton"); UB.Text="UNLOAD"; UB.Font=Enum.Font.GothamBold; UB.TextSize=9
-UB.TextColor3=Color3.fromRGB(200,70,70); UB.BackgroundColor3=Color3.fromRGB(35,15,15)
-UB.Size=UDim2.new(0,56,0,22); UB.Position=UDim2.new(1,-106,0.5,-11); UB.BorderSizePixel=0; UB.Parent=TB
-Instance.new("UICorner",UB).CornerRadius=UDim.new(0,5)
-Instance.new("UIStroke",UB).Color=Color3.fromRGB(120,30,30)
-
-local CLO=Instance.new("TextButton"); CLO.Text="✕"; CLO.Font=Enum.Font.GothamBold; CLO.TextSize=13; CLO.TextColor3=TXB
-CLO.BackgroundTransparency=1; CLO.Size=UDim2.new(0,40,0,46); CLO.Position=UDim2.new(1,-40,0,0); CLO.Parent=TB
-CLO.MouseButton1Click:Connect(function() WIN.Visible=not WIN.Visible end)
-CLO.MouseEnter:Connect(function() CLO.TextColor3=Color3.fromRGB(220,80,80) end)
-CLO.MouseLeave:Connect(function() CLO.TextColor3=TXB end)
-
-do  -- settings UI build block: all locals scoped here, freed before minimap/drag sections
-local TABROW=Instance.new("Frame")
-TABROW.Size=UDim2.new(1,-18,0,28); TABROW.Position=UDim2.new(0,9,0,52)
-TABROW.BackgroundTransparency=1; TABROW.Parent=WIN
-local TRL=Instance.new("UIListLayout")
-TRL.FillDirection=Enum.FillDirection.Horizontal; TRL.SortOrder=Enum.SortOrder.LayoutOrder
-TRL.Padding=UDim.new(0,4); TRL.Parent=TABROW
-
-local SEP=Instance.new("Frame"); SEP.Size=UDim2.new(1,-18,0,1); SEP.Position=UDim2.new(0,9,0,82)
-SEP.BackgroundColor3=Color3.fromRGB(26,26,42); SEP.BorderSizePixel=0; SEP.Parent=WIN
-
-local SCR=Instance.new("ScrollingFrame")
-SCR.Size=UDim2.new(1,0,1,-92); SCR.Position=UDim2.new(0,0,0,92); SCR.BackgroundTransparency=1
-SCR.ScrollBarThickness=2; SCR.ScrollBarImageColor3=Color3.fromRGB(80,50,160)
-SCR.BorderSizePixel=0; SCR.CanvasSize=UDim2.new(0,0,0,0); SCR.AutomaticCanvasSize=Enum.AutomaticSize.Y; SCR.Parent=WIN
-Instance.new("UIListLayout",SCR).SortOrder=Enum.SortOrder.LayoutOrder
-local SPad=Instance.new("UIPadding")
-SPad.PaddingLeft=UDim.new(0,9); SPad.PaddingRight=UDim.new(0,9)
-SPad.PaddingTop=UDim.new(0,10); SPad.PaddingBottom=UDim.new(0,10); SPad.Parent=SCR
-
-local tabBtns={} local tabPanes={}
-
-local function makeTab(name,icon,ord)
-    local btn=Instance.new("TextButton")
-    btn.Text=icon.." "..name; btn.Font=Enum.Font.GothamSemibold; btn.TextSize=11
-    btn.TextColor3=TXB; btn.BackgroundColor3=TABOF
-    btn.Size=UDim2.new(0,84,0,28); btn.BorderSizePixel=0; btn.LayoutOrder=ord; btn.Parent=TABROW
-    Instance.new("UICorner",btn).CornerRadius=UDim.new(0,6)
-    local pane=Instance.new("Frame"); pane.Name=name; pane.Size=UDim2.new(1,0,0,0)
-    pane.AutomaticSize=Enum.AutomaticSize.Y; pane.BackgroundTransparency=1
-    pane.Visible=false; pane.LayoutOrder=0; pane.Parent=SCR
-    local pl=Instance.new("UIListLayout"); pl.SortOrder=Enum.SortOrder.LayoutOrder; pl.Padding=UDim.new(0,4); pl.Parent=pane
-    tabBtns[name]=btn; tabPanes[name]=pane
-    btn.MouseButton1Click:Connect(function()
-        for _,p in pairs(tabPanes) do p.Visible=false end
-        for _,b in pairs(tabBtns) do TweenService:Create(b,TweenInfo.new(0.1),{BackgroundColor3=TABOF,TextColor3=TXB}):Play() end
-        pane.Visible=true
-        TweenService:Create(btn,TweenInfo.new(0.1),{BackgroundColor3=TABON,TextColor3=TXA}):Play()
-    end)
-    return pane
-end
-
-local function mkSec(p,label,ord)
-    local f=Instance.new("Frame"); f.Size=UDim2.new(1,0,0,24); f.BackgroundTransparency=1
-    f.LayoutOrder=ord or 0; f.Parent=p
-    local ln=Instance.new("Frame"); ln.Size=UDim2.new(1,0,0,1); ln.Position=UDim2.new(0,0,1,-1)
-    ln.BackgroundColor3=Color3.fromRGB(26,26,42); ln.BorderSizePixel=0; ln.Parent=f
-    mkL(f,label,Enum.Font.GothamBold,9,TXC,Enum.TextXAlignment.Left)
-end
-
-local function mkTog(p,label,tbl,key,ord,hint,onChange)
-    local h=hint and 46 or 38
-    local row=Instance.new("Frame"); row.Size=UDim2.new(1,0,0,h); row.BackgroundColor3=BG2
-    row.BorderSizePixel=0; row.LayoutOrder=ord or 0; row.Parent=p
-    Instance.new("UICorner",row).CornerRadius=UDim.new(0,7)
-    mkL(row,label,Enum.Font.GothamSemibold,12,TXA,Enum.TextXAlignment.Left,UDim2.new(0,12,0,8),UDim2.new(1,-58,0,20))
-    if hint then mkL(row,hint,Enum.Font.Gotham,9,TXB,Enum.TextXAlignment.Left,UDim2.new(0,12,0,26),UDim2.new(1,-58,0,14)) end
-    local pill=Instance.new("Frame"); pill.Size=UDim2.new(0,36,0,18); pill.Position=UDim2.new(1,-48,0.5,-9)
-    pill.BackgroundColor3=tbl[key] and TGON or TGOFF; pill.BorderSizePixel=0; pill.Parent=row
-    Instance.new("UICorner",pill).CornerRadius=UDim.new(1,0)
-    local dt=Instance.new("Frame"); dt.Size=UDim2.new(0,14,0,14)
-    dt.Position=tbl[key] and UDim2.new(1,-16,0.5,-7) or UDim2.new(0,2,0.5,-7)
-    dt.BackgroundColor3=WHITE; dt.BorderSizePixel=0; dt.Parent=pill
-    Instance.new("UICorner",dt).CornerRadius=UDim.new(1,0)
-    local hit=Instance.new("TextButton"); hit.Text=""; hit.BackgroundTransparency=1
-    hit.Size=UDim2.new(1,0,1,0); hit.Parent=row
-    hit.MouseButton1Click:Connect(function()
-        tbl[key]=not tbl[key]; local on=tbl[key]
-        TweenService:Create(pill,TweenInfo.new(0.12),{BackgroundColor3=on and TGON or TGOFF}):Play()
-        TweenService:Create(dt,TweenInfo.new(0.12),{Position=on and UDim2.new(1,-16,0.5,-7) or UDim2.new(0,2,0.5,-7)}):Play()
-        if onChange then onChange(on) end
-        saveCfg()
-    end)
-end
-
-local function mkSld(p,label,tbl,key,mn,mx,ord,hint)
-    local isF=(mx-mn)<=2
-    local h=hint and 68 or 58
-    local row=Instance.new("Frame"); row.Size=UDim2.new(1,0,0,h); row.BackgroundColor3=BG2
-    row.BorderSizePixel=0; row.LayoutOrder=ord or 0; row.Parent=p
-    Instance.new("UICorner",row).CornerRadius=UDim.new(0,7)
-    mkL(row,label,Enum.Font.GothamSemibold,12,TXA,Enum.TextXAlignment.Left,UDim2.new(0,12,0,8),UDim2.new(0.65,0,0,20))
-    if hint then mkL(row,hint,Enum.Font.Gotham,9,TXB,Enum.TextXAlignment.Left,UDim2.new(0,12,0,30),UDim2.new(1,-20,0,10)) end
-    local vb=Instance.new("Frame"); vb.Size=UDim2.new(0,52,0,20); vb.Position=UDim2.new(1,-62,0,8)
-    vb.BackgroundColor3=BG3; vb.BorderSizePixel=0; vb.Parent=row
-    Instance.new("UICorner",vb).CornerRadius=UDim.new(0,5)
-    local vL=mkL(vb,tostring(tbl[key]),Enum.Font.GothamBold,11,TXC)
-    local trk=Instance.new("Frame"); trk.Size=UDim2.new(1,-24,0,4); trk.Position=UDim2.new(0,12,1,-14)
-    trk.BackgroundColor3=Color3.fromRGB(26,26,44); trk.BorderSizePixel=0; trk.Parent=row
-    Instance.new("UICorner",trk).CornerRadius=UDim.new(1,0)
-    local p0=math.clamp((tbl[key]-mn)/(mx-mn),0,1)
-    local fill=Instance.new("Frame"); fill.BackgroundColor3=TABON; fill.BorderSizePixel=0
-    fill.Size=UDim2.new(p0,0,1,0); fill.Parent=trk
-    Instance.new("UICorner",fill).CornerRadius=UDim.new(1,0)
-    local th=Instance.new("Frame"); th.Size=UDim2.new(0,12,0,12); th.Position=UDim2.new(p0,-6,0.5,-6)
-    th.BackgroundColor3=WHITE; th.BorderSizePixel=0; th.Parent=trk
-    Instance.new("UICorner",th).CornerRadius=UDim.new(1,0)
-    local sdrag=false
-    local ht=Instance.new("TextButton"); ht.Text=""; ht.BackgroundTransparency=1
-    ht.Size=UDim2.new(1,0,0,24); ht.Position=UDim2.new(0,0,0,-10); ht.Parent=trk
-    local function apply(mx2)
-        local a=trk.AbsolutePosition; local s=trk.AbsoluteSize
-        local pct=math.clamp((mx2-a.X)/s.X,0,1)
-        local raw=mn+(mx-mn)*pct
-        local val=isF and (math.floor(raw*10)/10) or math.floor(raw)
-        tbl[key]=val; fill.Size=UDim2.new(pct,0,1,0); th.Position=UDim2.new(pct,-6,0.5,-6); vL.Text=tostring(val)
-        saveCfg()
-    end
-    ht.MouseButton1Down:Connect(function() sdrag=true; apply(UIS:GetMouseLocation().X) end)
-    UIS.InputChanged:Connect(function(i)
-        if sdrag and i.UserInputType==Enum.UserInputType.MouseMovement then apply(UIS:GetMouseLocation().X) end
-    end)
-    UIS.InputEnded:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.MouseButton1 then sdrag=false end
-    end)
-end
-
-local function mkChoice(p, label, hint, tbl, key, choices, ord)
-    local h = hint and 68 or 58
-    local row=Instance.new("Frame"); row.Size=UDim2.new(1,0,0,h); row.BackgroundColor3=BG2
-    row.BorderSizePixel=0; row.LayoutOrder=ord or 0; row.Parent=p
-    Instance.new("UICorner",row).CornerRadius=UDim.new(0,7)
-    mkL(row,label,Enum.Font.GothamSemibold,12,TXA,Enum.TextXAlignment.Left,UDim2.new(0,12,0,8),UDim2.new(1,0,0,18))
-    if hint then mkL(row,hint,Enum.Font.Gotham,9,TXB,Enum.TextXAlignment.Left,UDim2.new(0,12,0,26),UDim2.new(1,-20,0,14)) end
-    local brow=Instance.new("Frame"); brow.Size=UDim2.new(1,-24,0,26); brow.Position=UDim2.new(0,12,1,-34)
-    brow.BackgroundTransparency=1; brow.Parent=row
-    local ll=Instance.new("UIListLayout"); ll.FillDirection=Enum.FillDirection.Horizontal
-    ll.Padding=UDim.new(0,4); ll.SortOrder=Enum.SortOrder.LayoutOrder; ll.Parent=brow
-    local btnMap={}
-    local n=math.max(#choices,1)
-    local bwScale=1/n; local bwOffset=-math.ceil((n-1)*4/n)
-    for idx, choice in ipairs(choices) do
-        local active=tbl[key]==choice
-        local b=Instance.new("TextButton"); b.Text=choice; b.Font=Enum.Font.GothamSemibold; b.TextSize=11
-        b.TextColor3=active and TXA or TXB; b.BackgroundColor3=active and TABON or BG3
-        b.Size=UDim2.new(bwScale,bwOffset,1,0); b.BorderSizePixel=0; b.LayoutOrder=idx; b.Parent=brow
-        Instance.new("UICorner",b).CornerRadius=UDim.new(0,5)
-        btnMap[choice]=b
-        b.MouseButton1Click:Connect(function()
-            tbl[key]=choice
-            for c,btn in pairs(btnMap) do
-                TweenService:Create(btn,TweenInfo.new(0.1),{
-                    BackgroundColor3=c==choice and TABON or BG3,
-                    TextColor3=c==choice and TXA or TXB,
-                }):Play()
-            end
-        end)
+-- ── load the APEX GUI library (keeps this file tiny) ──
+local Apex
+do
+    local LIB_URL = "https://raw.githubusercontent.com/XnotCykoX/nexus-gui/master/gui.lua"
+    local okGet, src = pcall(function() return game:HttpGet(LIB_URL) end)
+    if not okGet then warn("[NEXUS] GUI lib fetch failed: " .. tostring(src)) end
+    if okGet then
+        local okLoad, lib = pcall(function() return loadstring(src)() end)
+        if okLoad then Apex = lib else warn("[NEXUS] GUI lib load failed: " .. tostring(lib)) end
     end
 end
+if not Apex then
+    warn("[NEXUS] GUI library unavailable — running headless (features still work via keybinds).")
+else
+-- ── everything from here to the matching `end` builds the menu; if the lib failed to load we
+--    simply skip the menu and the rest of the script (aim loop, minimap, alarm) still runs. ──
 
-local rebinding=false
-local function mkBind(p,label,tbl,key,ord)
-    local row=Instance.new("Frame"); row.Size=UDim2.new(1,0,0,46); row.BackgroundColor3=BG2
-    row.BorderSizePixel=0; row.LayoutOrder=ord or 0; row.Parent=p
-    Instance.new("UICorner",row).CornerRadius=UDim.new(0,7)
-    mkL(row,label,Enum.Font.GothamSemibold,12,TXA,Enum.TextXAlignment.Left,UDim2.new(0,12,0,8),UDim2.new(1,-100,0,20))
-    mkL(row,"click to rebind · Esc=cancel",Enum.Font.Gotham,9,TXB,Enum.TextXAlignment.Left,UDim2.new(0,12,0,28),UDim2.new(1,-100,0,14))
-    local kb=Instance.new("TextButton")
-    kb.Text=tostring(tbl[key]):gsub("Enum.KeyCode.",""); kb.Font=Enum.Font.GothamBold; kb.TextSize=10
-    kb.TextColor3=TXC; kb.BackgroundColor3=BG3; kb.Size=UDim2.new(0,80,0,26); kb.Position=UDim2.new(1,-90,0.5,-13)
-    kb.BorderSizePixel=0; kb.Parent=row
-    Instance.new("UICorner",kb).CornerRadius=UDim.new(0,6)
-    Instance.new("UIStroke",kb).Color=Color3.fromRGB(60,40,100)
-    local listening=false
-    kb.MouseButton1Click:Connect(function()
-        if rebinding then return end
-        rebinding=true; listening=true; kb.Text="..."; kb.TextColor3=Color3.fromRGB(255,210,50)
-    end)
-    conn(UIS.InputBegan:Connect(function(i,gpe)
-        if not listening then return end
-        if i.UserInputType ~= Enum.UserInputType.Keyboard then return end
-        if i.KeyCode ~= Enum.KeyCode.Escape then
-            tbl[key]=i.KeyCode; kb.Text=tostring(i.KeyCode):gsub("Enum.KeyCode.","")
-            saveCfg()
-        else
-            kb.Text=tostring(tbl[key]):gsub("Enum.KeyCode.","")
-        end
-        kb.TextColor3=TXC; listening=false; rebinding=false
-    end))
-end
+local Window = Apex:CreateWindow("NEXUS  |  " .. (IS_FL and "FRONTLINES" or "UNIVERSAL"))
+Window.ToggleKey = Enum.KeyCode.RightAlt   -- preserve the old RightAlt = show/hide UI behaviour
 
--- multi-select toggle grid — multiple buttons can be active at once.
--- tbl[key] is a {PartName=bool} table. each button flips its own entry.
--- options = PART_OPTIONS-style list of {id, label} pairs.
-local function mkMultiSelect(p, label, tbl, key, options, ord)
-    local rows    = math.ceil(#options / 3)
-    local gridH   = rows * 26 + math.max(0, rows-1) * 4
-    local totalH  = 52 + gridH + 8
-    local row     = Instance.new("Frame")
-    row.Size           = UDim2.new(1,0,0,totalH)
-    row.BackgroundColor3 = BG2
-    row.BorderSizePixel  = 0
-    row.LayoutOrder      = ord or 0
-    row.Parent           = p
-    Instance.new("UICorner",row).CornerRadius = UDim.new(0,7)
-    mkL(row, label, Enum.Font.GothamSemibold, 12, TXA,
-        Enum.TextXAlignment.Left, UDim2.new(0,12,0,8), UDim2.new(1,0,0,18))
-    mkL(row, "select multiple — randomly picks one per lock", Enum.Font.Gotham, 9, TXB,
-        Enum.TextXAlignment.Left, UDim2.new(0,12,0,26), UDim2.new(1,-20,0,14))
-    local grid = Instance.new("Frame")
-    grid.Size                = UDim2.new(1,-24,0,gridH)
-    grid.Position            = UDim2.new(0,12,0,46)
-    grid.BackgroundTransparency = 1
-    grid.Parent              = row
-    local gl = Instance.new("UIGridLayout")
-    -- 3 columns: (416 - 2 gaps * 4) / 3 = 136 px per cell
-    gl.CellSize    = UDim2.new(0,136,0,26)
-    gl.CellPadding = UDim2.new(0,4,0,4)
-    gl.SortOrder   = Enum.SortOrder.LayoutOrder
-    gl.Parent      = grid
-    for idx, opt in ipairs(options) do
-        local active = tbl[key][opt.id] == true
-        local b = Instance.new("TextButton")
-        b.Text             = opt.label
-        b.Font             = Enum.Font.GothamSemibold
-        b.TextSize         = 10
-        b.TextColor3       = active and TXA or TXB
-        b.BackgroundColor3 = active and TABON or BG3
-        b.BorderSizePixel  = 0
-        b.LayoutOrder      = idx
-        b.Parent           = grid
-        Instance.new("UICorner",b).CornerRadius = UDim.new(0,5)
-        b.MouseButton1Click:Connect(function()
-            tbl[key][opt.id] = not (tbl[key][opt.id] == true)
-            local on = tbl[key][opt.id] == true
-            TweenService:Create(b, TweenInfo.new(0.1), {
-                BackgroundColor3 = on and TABON or BG3,
-                TextColor3       = on and TXA or TXB,
-            }):Play()
-        end)
-    end
-end
+-- set a cfg value and persist to disk
+local function set(tbl, key, val) tbl[key] = val; saveCfg() end
 
-local aP=makeTab("Aimbot",     "◎",1)
-local eP=makeTab("ESP",        "◈",2)
-local sP=makeTab("Sprint",     "▶",3)
-local lpP=makeTab("LocalPlayer","☺",4)
-local mP=makeTab("Misc",       "⊹",5)
+local aP = Window:CreateTab("Aimbot")
+local eP = Window:CreateTab("ESP")
+local sP = Window:CreateTab("Sprint")
+local mP = Window:CreateTab("Misc")
 
-mkSec(aP,"CORE",0)
-mkTog(aP,"Aimbot Enabled",            cfg.aim,"enabled",    1)
-mkTog(aP,"Aim Lock  (Shift+Q)",       cfg.aim,"toggle_mode",2,"RMB=hold · Shift+Q=persistent lock")
-mkSec(aP,"MODE",3)
-mkChoice(aP,"Aim Mode",
-    "Smooth · Flick=snap once · Rage=instant · Human=drift · Trickshot=COD flick",
-    cfg.aim,"mode",{"Smooth","Flick","Rage","Human","Trickshot"},4)
-mkSec(aP,"TARGETING",5)
-mkTog(aP,"Team Check",                cfg.aim,"team_check", 6)
-mkTog(aP,"Skip Targets Behind Walls", cfg.aim,"vis_check",  7)
-mkTog(aP,"Velocity Prediction",       cfg.aim,"prediction", 8,"accel-based · pos + vel·t + ½a·t²")
-mkMultiSelect(aP,"Target Part",       cfg.aim,"target_parts", PART_OPTIONS, 9)
-mkSec(aP,"TUNING",10)
-mkSld(aP,"FOV Radius",                cfg.aim,"fov",       50, 500, 11)
-mkSld(aP,"Smoothness",                cfg.aim,"smooth",     1,  20, 12,"Smooth + Human only · 1=snap")
-mkSld(aP,"Pred Factor",               cfg.aim,"pred_mult",  0, 0.5, 13)
-mkSld(aP,"Proj Speed (studs/s)",      cfg.aim,"pred_speed",100,2000,14,"time-of-flight = dist ÷ this")
-mkSld(aP,"Flick Speed (s)",           cfg.aim,"ts_flick_dur",0.03,0.5,15,"Trickshot only · lower = faster snap")
-mkSec(aP,"TRIGGERBOT",16)
-mkTog(aP,"Triggerbot",                cfg.aim,"triggerbot", 17)
-mkSld(aP,"Trigger Delay (s)",         cfg.aim,"trig_delay", 0, 0.5, 18)
+-- ═════════ AIMBOT ═════════
+aP:CreateSection("Core")
+aP:CreateToggle("Aimbot Enabled", cfg.aim.enabled, function(v) set(cfg.aim, "enabled", v) end)
+aP:CreateToggle("Aim Lock (Shift+Q)", cfg.aim.toggle_mode, function(v) set(cfg.aim, "toggle_mode", v) end, "RMB=hold · Shift+Q=persistent lock")
+aP:CreateSection("Mode")
+aP:CreateDropdown("Aim Mode", {"Smooth", "Flick", "Rage", "Human", "Trickshot"}, cfg.aim.mode, function(v) set(cfg.aim, "mode", v) end)
+aP:CreateSection("Targeting")
+aP:CreateToggle("Team Check", cfg.aim.team_check, function(v) set(cfg.aim, "team_check", v) end)
+aP:CreateToggle("Skip Targets Behind Walls", cfg.aim.vis_check, function(v) set(cfg.aim, "vis_check", v) end)
+aP:CreateToggle("Velocity Prediction", cfg.aim.prediction, function(v) set(cfg.aim, "prediction", v) end, "accel-based · pos + vel·t + ½a·t²")
+aP:CreateMultiSelect("Target Part", PART_OPTIONS, cfg.aim.target_parts, function(id, st) cfg.aim.target_parts[id] = st; saveCfg() end)
+aP:CreateSection("Tuning")
+aP:CreateSlider("FOV Radius", 50, 500, cfg.aim.fov, function(v) set(cfg.aim, "fov", v) end)
+aP:CreateSlider("Smoothness", 1, 20, cfg.aim.smooth, function(v) set(cfg.aim, "smooth", v) end)
+aP:CreateSlider("Pred Factor", 0, 0.5, cfg.aim.pred_mult, function(v) set(cfg.aim, "pred_mult", v) end, 2)
+aP:CreateSlider("Proj Speed (studs/s)", 100, 2000, cfg.aim.pred_speed, function(v) set(cfg.aim, "pred_speed", v) end)
+aP:CreateSlider("Flick Speed (s)", 0.03, 0.5, cfg.aim.ts_flick_dur, function(v) set(cfg.aim, "ts_flick_dur", v) end, 2)
+aP:CreateSection("Triggerbot")
+aP:CreateToggle("Triggerbot", cfg.aim.triggerbot, function(v) set(cfg.aim, "triggerbot", v) end)
+aP:CreateSlider("Trigger Delay (s)", 0, 0.5, cfg.aim.trig_delay, function(v) set(cfg.aim, "trig_delay", v) end, 2)
+aP:CreateSection("Auto Switch")
+aP:CreateToggle("Auto Retarget", cfg.aim.auto_switch, function(v) set(cfg.aim, "auto_switch", v) end, "locks a new target when the current one dies")
+aP:CreateSection("Keybind")
+aP:CreateKeybind("Aimbot Toggle Key", cfg.keys.aim, function(k) set(cfg.keys, "aim", k) end)
 
-mkSec(eP,"CORE",0)
-mkTog(eP,"ESP Enabled",               cfg.esp,"enabled",   1)
-mkTog(eP,"Team Check",                cfg.esp,"team_check",2,"red=visible · blue=hidden · gold=locked")
-mkSec(eP,"STYLE",3)
-mkTog(eP,"Box",                       cfg.esp,"box",       4)
-mkTog(eP,"Rainbow",                   cfg.esp,"rainbow",   5)
-mkTog(eP,"Corner Brackets",           cfg.esp,"corners",   6)
-mkSec(eP,"ELEMENTS",7)
-mkTog(eP,"Names",                     cfg.esp,"names",     8)
-mkTog(eP,"Health Bars",               cfg.esp,"health",    9)
-mkTog(eP,"Tracers",                   cfg.esp,"tracers",   10)
-mkTog(eP,"Distance",                  cfg.esp,"distance",  11)
-mkTog(eP,"Skeleton",                  cfg.esp,"skeleton",  12)
-mkTog(eP,"Avatar Outline",            cfg.esp,"outline",   13,"3D highlight · matches ESP colour · visible through walls")
+-- ═════════ ESP ═════════
+eP:CreateSection("Core")
+eP:CreateToggle("ESP Enabled", cfg.esp.enabled, function(v) set(cfg.esp, "enabled", v) end)
+eP:CreateToggle("Team Check", cfg.esp.team_check, function(v) set(cfg.esp, "team_check", v) end, "red=visible · blue=hidden · gold=locked")
+eP:CreateSection("Style")
+eP:CreateToggle("Box", cfg.esp.box, function(v) set(cfg.esp, "box", v) end)
+eP:CreateToggle("Rainbow", cfg.esp.rainbow, function(v) set(cfg.esp, "rainbow", v) end)
+eP:CreateToggle("Corner Brackets", cfg.esp.corners, function(v) set(cfg.esp, "corners", v) end)
+eP:CreateSection("Elements")
+eP:CreateToggle("Names", cfg.esp.names, function(v) set(cfg.esp, "names", v) end)
+eP:CreateToggle("Health Bars", cfg.esp.health, function(v) set(cfg.esp, "health", v) end)
+eP:CreateToggle("Tracers", cfg.esp.tracers, function(v) set(cfg.esp, "tracers", v) end)
+eP:CreateToggle("Distance", cfg.esp.distance, function(v) set(cfg.esp, "distance", v) end)
+eP:CreateToggle("Skeleton", cfg.esp.skeleton, function(v) set(cfg.esp, "skeleton", v) end)
+eP:CreateToggle("Avatar Outline", cfg.esp.outline, function(v) set(cfg.esp, "outline", v) end, "3D highlight · visible through walls")
+eP:CreateSection("Distance Fade")
+eP:CreateToggle("Distance Fade", cfg.esp.dist_fade, function(v) set(cfg.esp, "dist_fade", v) end, "fade ESP as enemies get farther")
+eP:CreateSlider("Fade Start (st)", 0, 500, cfg.esp.fade_start, function(v) set(cfg.esp, "fade_start", v) end)
+eP:CreateSlider("Fade End (st)", 0, 500, cfg.esp.fade_end, function(v) set(cfg.esp, "fade_end", v) end)
+eP:CreateSection("Keybind")
+eP:CreateKeybind("ESP Toggle Key", cfg.keys.esp, function(k) set(cfg.keys, "esp", k) end)
 
-mkSec(sP,"SPRINT",0)
-mkTog(sP,"Sprint Enabled",            cfg.sprint,"enabled",    1)
-mkBind(sP,"Sprint Key",               cfg.sprint,"key",        2)
-mkSld(sP,"Sprint Speed",              cfg.sprint,"speed",      16,120,3)
-mkSld(sP,"Default Walkspeed",         cfg.sprint,"default_spd",8, 50, 4)
+-- ═════════ SPRINT ═════════
+sP:CreateSection("Sprint")
+sP:CreateToggle("Sprint Enabled", cfg.sprint.enabled, function(v) set(cfg.sprint, "enabled", v) end)
+sP:CreateKeybind("Sprint Key", cfg.sprint.key, function(k) set(cfg.sprint, "key", k) end)
+sP:CreateSlider("Sprint Speed", 16, 120, cfg.sprint.speed, function(v) set(cfg.sprint, "speed", v) end)
+sP:CreateSlider("Default Walkspeed", 8, 50, cfg.sprint.default_spd, function(v) set(cfg.sprint, "default_spd", v) end)
 
-mkSec(lpP,"LOCAL PLAYER",0)
-mkTog(lpP,"Enabled",                  cfg.localplayer,"enabled",  1,"forces WalkSpeed/JumpPower every frame · overrides Sprint while on")
-mkSld(lpP,"Walkspeed",                cfg.localplayer,"walkspeed",8, 500,2)
-mkSld(lpP,"Jumppower",                cfg.localplayer,"jumppower",20,400,3)
-
-mkSec(mP,"TARGETING",0)
-mkTog(mP,"NPC / Bot Mode",cfg.misc,"npc_mode",1,"targets humanoid NPCs · Scoped / bot games",function(on)
+-- ═════════ MISC ═════════
+mP:CreateSection("Targeting")
+mP:CreateToggle("NPC / Bot Mode", cfg.misc.npc_mode, function(on)
+    cfg.misc.npc_mode = on; saveCfg()
     if on then
         rebuildModelCache()
         for obj in pairs(modelCache) do registerESP(obj) end
     else
         for k in pairs(pool) do
-            if typeof(k)=="Instance" and k:IsA("Model") then destroyESP(k) end
+            if typeof(k) == "Instance" and k:IsA("Model") then destroyESP(k) end
         end
-        modelCache={}
+        modelCache = {}
     end
-end)
-mkSec(mP,"MAGIC BULLET",2)
-mkTog(mP,"Magic Bullet",cfg.misc,"magic_bullet",3,
-    "redirects bullets to locked target · requires aimbot lock")
-mkTog(mP,"MB Debug Log",cfg.misc,"mb_debug",4,
-    "prints magic bullet events to console — turn off when not diagnosing")
-mkSec(mP,"MINIMAP",4)
-mkTog(mP,"Minimap",      cfg.minimap,"enabled", 5,"north-up terrain map · arrow = cam dir · drag to reposition")
-mkTog(mP,"FOV Cone",     cfg.minimap,"fov_cone",6,"yellow wedge showing camera field of view on radar")
-mkSld(mP,"Radar Size",   cfg.minimap,"size",    100,300,7,nil,true)
-mkSld(mP,"Radar Range",  cfg.minimap,"range",    50,500,8,"studs radius shown")
-mkSec(mP,"VISUALS",9)
-mkTog(mP,"FOV Circle",   cfg.misc,"fov_circle",10)
-mkTog(mP,"Crosshair",    cfg.misc,"crosshair", 11)
-mkSld(mP,"Crosshair Size",cfg.misc,"ch_size",  7,30,12)
-mkSec(mP,"COMBAT",13)
-mkTog(mP,"Bhop",          cfg.misc,"bhop",         14,"auto-rejump on landing while space held")
-mkTog(mP,"Noclip",        cfg.misc,"noclip",       15,"disables character collision · toggle off to restore")
-mkSec(mP,"ANTI-RECOIL",16)
-mkTog(mP,"Anti-Recoil",  cfg.misc,"anti_recoil",   17,"pitches camera down to counter vertical recoil · yields to aimbot when locked")
-mkSld(mP,"AR Strength",  cfg.misc,"ar_strength",   0,1,18,"1.0 = perfect lock · 0.5 = half correction · lower = less aggressive")
-mkSec(mP,"ALARM",19)
-mkTog(mP,"Proximity Alarm",cfg.misc,"prox_alarm",  20,"pulsing red border when enemy is close")
-mkSld(mP,"Alarm Distance", cfg.misc,"prox_dist",   5,200,21,"studs · triggers alarm at this range")
-mkSec(aP,"AUTO SWITCH",19)
-mkTog(aP,"Auto Retarget",  cfg.aim,"auto_switch",  20,"immediately locks new target when current dies · disable to hold fire until key re-pressed")
-mkSec(eP,"DISTANCE FADE",14)
-mkTog(eP,"Distance Fade",  cfg.esp,"dist_fade",    15,"ESP elements fade out as enemies get farther away")
-mkSld(eP,"Fade Start (st)",cfg.esp,"fade_start",   0,500,16,"full opacity within this range")
-mkSld(eP,"Fade End (st)",  cfg.esp,"fade_end",     0,500,17,"fully invisible beyond this range")
+end, "targets humanoid NPCs · Scoped / bot games")
+mP:CreateSection("Magic Bullet")
+mP:CreateToggle("Magic Bullet", cfg.misc.magic_bullet, function(v) set(cfg.misc, "magic_bullet", v) end, "redirects bullets to locked target")
+mP:CreateToggle("MB Debug Log", cfg.misc.mb_debug, function(v) set(cfg.misc, "mb_debug", v) end, "prints magic bullet events to console")
+mP:CreateSection("Minimap")
+mP:CreateToggle("Minimap", cfg.minimap.enabled, function(v) set(cfg.minimap, "enabled", v) end, "north-up radar · drag to reposition")
+mP:CreateToggle("FOV Cone", cfg.minimap.fov_cone, function(v) set(cfg.minimap, "fov_cone", v) end, "camera field-of-view wedge on the radar")
+mP:CreateSlider("Radar Size", 100, 300, cfg.minimap.size, function(v) set(cfg.minimap, "size", v) end)
+mP:CreateSlider("Radar Range", 50, 500, cfg.minimap.range, function(v) set(cfg.minimap, "range", v) end)
+mP:CreateSection("Visuals")
+mP:CreateToggle("FOV Circle", cfg.misc.fov_circle, function(v) set(cfg.misc, "fov_circle", v) end)
+mP:CreateToggle("Crosshair", cfg.misc.crosshair, function(v) set(cfg.misc, "crosshair", v) end)
+mP:CreateSlider("Crosshair Size", 7, 30, cfg.misc.ch_size, function(v) set(cfg.misc, "ch_size", v) end)
+mP:CreateSection("Combat")
+mP:CreateToggle("Bhop", cfg.misc.bhop, function(v) set(cfg.misc, "bhop", v) end, "auto-rejump on landing while space held")
+mP:CreateToggle("Noclip", cfg.misc.noclip, function(v) set(cfg.misc, "noclip", v) end, "disables character collision")
+mP:CreateSection("Anti-Recoil")
+mP:CreateToggle("Anti-Recoil", cfg.misc.anti_recoil, function(v) set(cfg.misc, "anti_recoil", v) end, "counters vertical recoil · yields to aimbot")
+mP:CreateSlider("AR Strength", 0, 1, cfg.misc.ar_strength, function(v) set(cfg.misc, "ar_strength", v) end, 2)
+mP:CreateSection("Alarm")
+mP:CreateToggle("Proximity Alarm", cfg.misc.prox_alarm, function(v) set(cfg.misc, "prox_alarm", v) end, "pulsing red border when an enemy is close")
+mP:CreateSlider("Alarm Distance", 5, 200, cfg.misc.prox_dist, function(v) set(cfg.misc, "prox_dist", v) end)
+mP:CreateSection("Keybinds")
+mP:CreateKeybind("Bhop Toggle Key", cfg.keys.bhop, function(k) set(cfg.keys, "bhop", k) end)
+mP:CreateKeybind("Noclip Toggle Key", cfg.keys.noclip, function(k) set(cfg.keys, "noclip", k) end)
+mP:CreateKeybind("Anti-Recoil Toggle Key", cfg.keys.anti_recoil, function(k) set(cfg.keys, "anti_recoil", k) end)
+mP:CreateSection("System")
+mP:CreateButton("Unload & Destroy NEXUS", function() if nexusUnload then nexusUnload() end end)
 
-mkSec(aP,"KEYBIND",21)
-mkBind(aP,"Aimbot Toggle Key",       cfg.keys,"aim",         22)
-mkSec(eP,"KEYBIND",18)
-mkBind(eP,"ESP Toggle Key",          cfg.keys,"esp",         19)
-mkSec(mP,"KEYBINDS",22)
-mkBind(mP,"Bhop Toggle Key",         cfg.keys,"bhop",        23)
-mkBind(mP,"Noclip Toggle Key",       cfg.keys,"noclip",      24)
-mkBind(mP,"Anti-Recoil Toggle Key",  cfg.keys,"anti_recoil", 25)
-
-tabPanes["Aimbot"].Visible=true
-TweenService:Create(tabBtns["Aimbot"],TweenInfo.new(0),{BackgroundColor3=TABON,TextColor3=TXA}):Play()
-end  -- settings UI build block
+end  -- if Apex (menu built)
 
 -- // ═══════════════ PROXIMITY ALARM ═════════════════ //
 -- full-screen red vignette border that pulses (sin-wave) when the nearest
@@ -3155,53 +2880,40 @@ end
 
 -- // ════════════════ UNLOAD ══════════════════════════ //
 
-do
-    local function unload()
-        for _,c in ipairs(conns) do pcall(function() c:Disconnect() end) end
-        RunService:UnbindFromRenderStep("NexusAim")
-        pcall(function() fovCircle:Remove()  end)
-        pcall(function() lockCircle:Remove() end)
-        pcall(function() chH:Remove() end)
-        pcall(function() chV:Remove() end)
-        for key in pairs(pool) do destroyESP(key) end
-        for key in pairs(mmDots) do mmDestroyDot(key) end
-        pcall(function() mmFrame:Destroy() end)
-        pcall(function() proxFrame:Destroy() end)
-        -- restore noclip: re-enable collision on all character parts
-        local char = lp.Character
-        if char then
-            for _, part in ipairs(char:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    pcall(function() part.CanCollide = true end)
-                end
+-- Assigns the forward-declared `nexusUnload` (defined up in the UI block) so the APEX "Unload"
+-- button can trigger full cleanup. Also tears down the APEX menu ScreenGui, not just our overlays.
+-- Window dragging + the RightAlt show/hide toggle are now handled inside the APEX library itself.
+nexusUnload = function()
+    for _,c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+    RunService:UnbindFromRenderStep("NexusAim")
+    pcall(function() fovCircle:Remove()  end)
+    pcall(function() lockCircle:Remove() end)
+    pcall(function() chH:Remove() end)
+    pcall(function() chV:Remove() end)
+    for key in pairs(pool) do destroyESP(key) end
+    for key in pairs(mmDots) do mmDestroyDot(key) end
+    pcall(function() mmFrame:Destroy() end)
+    pcall(function() proxFrame:Destroy() end)
+    -- restore noclip: re-enable collision on all character parts
+    local char = lp.Character
+    if char then
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                pcall(function() part.CanCollide = true end)
             end
         end
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        if hum then hum.WalkSpeed = 16; hum.JumpPower = 50 end
-        SG:Destroy(); print("[NEXUS] unloaded")
     end
-    UB.MouseButton1Click:Connect(unload)
-end
-
-do
-    local drag2,ds2,wp2=false,nil,nil
-    TB.InputBegan:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.MouseButton1 then drag2=true; ds2=i.Position; wp2=WIN.Position end
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then hum.WalkSpeed = 16 end
+    pcall(function() SG:Destroy() end)
+    -- destroy the APEX menu ScreenGui too (the library parents it to CoreGui / PlayerGui)
+    pcall(function()
+        local root = (pcall(gethui) and gethui()) or game:GetService("CoreGui")
+        local menu = root:FindFirstChild("ApexLibrary_UI")
+        if menu then menu:Destroy() end
     end)
-    conn(UIS.InputChanged:Connect(function(i)
-        if drag2 and i.UserInputType==Enum.UserInputType.MouseMovement then
-            local d=i.Position-ds2
-            WIN.Position=UDim2.new(wp2.X.Scale,wp2.X.Offset+d.X,wp2.Y.Scale,wp2.Y.Offset+d.Y)
-        end
-    end))
-    conn(UIS.InputEnded:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.MouseButton1 then drag2=false end
-    end))
+    print("[NEXUS] unloaded")
 end
-conn(UIS.InputBegan:Connect(function(i,gpe)
-    if gpe then return end
-    if i.KeyCode==Enum.KeyCode.RightAlt then WIN.Visible=not WIN.Visible end
-end))
 
 print("[NEXUS] ready"
     ..(IS_FL and " · FRONTLINES" or " · universal")
