@@ -14,8 +14,8 @@
 --   1) append `return ApexLibrary` so `loadstring(...)()` yields the table.
 --   2) a parent-selection shim so the UI works on every executor. The stock library commits to
 --      CoreGui after only reading CoreGui.Name; executors that allow that read but block parenting
---      (e.g. "lacking capability Plugin") then error. The shim prefers gethui(), falls back to
---      CoreGui only if it's actually writable, else PlayerGui.
+--      (e.g. "lacking capability Plugin") then error. The shim uses gethui() (the safe hidden
+--      container), falling back to PlayerGui — and never touches CoreGui directly (see the note below).
 local Apex
 do
     local url = "https://raw.githubusercontent.com/XnotCykoX/nexus-scripts/refs/heads/main/Gui%20Library.lua"
