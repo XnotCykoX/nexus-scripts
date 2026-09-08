@@ -20,11 +20,11 @@ local Apex
 do
     local url = "https://raw.githubusercontent.com/XnotCykoX/nexus-scripts/refs/heads/main/Gui%20Library.lua"
     local src = game:HttpGet(url)
-    -- Use gethui() ONLY if its result is actually writable, else PlayerGui. On some executors gethui()
-    -- returns a CoreGui-descendant (e.g. RobloxGui) that this thread can't operate on ("lacking
-    -- capability Plugin"), and the stock library would then throw on ParentUI:FindFirstChild and
-    -- half-build the UI. Probing writability first guarantees a usable parent. CoreGui is never touched.
-    local shim = "local ParentUI=(function() local a pcall(function() a=gethui() end) if a then local w=pcall(function() local f=Instance.new('Folder') f.Parent=a f:Destroy() end) if w then return a end end return LocalPlayer:WaitForChild('PlayerGui') end)()\n"
+    -- Force the UI parent to PlayerGui. gethui()/CoreGui/RobloxGui are blocked inconsistently on this
+    -- environment ("lacking capability Plugin") — operating on them throws inside CreateWindow and
+    -- half-builds the menu. PlayerGui is reliably writable everywhere; ResetOnSpawn=false keeps the UI
+    -- across respawns. This is the single change that makes the whole thing actually run.
+    local shim = "local ParentUI=LocalPlayer:WaitForChild('PlayerGui')\n"
     src = src:gsub("local ParentUI = .-\n", shim, 1)
     Apex = loadstring(src .. "\nreturn ApexLibrary")()
 end
@@ -190,9 +190,7 @@ local chip
 pcall(function()
     local hudGui = Instance.new("ScreenGui")
     hudGui.Name = "NexusAPStatus"; hudGui.ResetOnSpawn = false; hudGui.IgnoreGuiInset = true
-    local p pcall(function() p = gethui() end)
-    if p then local w = pcall(function() local f = Instance.new("Folder") f.Parent = p f:Destroy() end) if not w then p = nil end end
-    hudGui.Parent = p or pg
+    hudGui.Parent = pg   -- PlayerGui only (see shim note): gethui/CoreGui are blocked here
     AP.hudGui = hudGui
     chip = Instance.new("TextLabel")
     chip.AnchorPoint = Vector2.new(0.5, 0); chip.Position = UDim2.new(0.5, 0, 0, 8); chip.Size = UDim2.new(0, 320, 0, 24)
