@@ -20,7 +20,11 @@ local Apex
 do
     local url = "https://raw.githubusercontent.com/XnotCykoX/nexus-scripts/refs/heads/main/Gui%20Library.lua"
     local src = game:HttpGet(url)
-    local shim = "local ParentUI=(function() local a pcall(function() a=gethui() end) if a then return a end local ok=pcall(function() local f=Instance.new('Folder') f.Parent=CoreGui f:Destroy() end) if ok then return CoreGui end return LocalPlayer:WaitForChild('PlayerGui') end)()\n"
+    -- gethui() first, else PlayerGui. Deliberately NEVER touch CoreGui directly: on some executors
+    -- any CoreGui access (even a caught pcall) permanently drops the thread's capability, after which
+    -- every Instance.new fails — which silently half-builds the UI. gethui already returns the safe
+    -- hidden container, so CoreGui is never needed.
+    local shim = "local ParentUI=(function() local a pcall(function() a=gethui() end) if a then return a end return LocalPlayer:WaitForChild('PlayerGui') end)()\n"
     src = src:gsub("local ParentUI = .-\n", shim, 1)
     Apex = loadstring(src .. "\nreturn ApexLibrary")()
 end
@@ -217,9 +221,9 @@ AP.Destroy = function()
     pcall(function() AP.statConn:Disconnect() end)
     releaseAllKeys()
     pcall(function() AP.hudGui:Destroy() end)
+    -- find/destroy the Apex UI via gethui()/PlayerGui only — never CoreGui (see the shim note above).
     local roots = { pg }
     pcall(function() roots[#roots+1] = gethui() end)
-    pcall(function() roots[#roots+1] = game:GetService("CoreGui") end)
     for _, root in ipairs(roots) do
         if root then pcall(function() local u = root:FindFirstChild("ApexLibrary_UI") if u then u:Destroy() end end) end
     end
